@@ -178,6 +178,7 @@ class AdbConnectionPlugin : Plugin() {
             putExtra(ScrcpyActivity.EXTRA_HOST, host)
             putExtra(ScrcpyActivity.EXTRA_PORT, port)
             putExtra(ScrcpyActivity.EXTRA_DEVICE_ID, device.deviceId)
+            putExtra(ScrcpyActivity.EXTRA_PREFS_NAME, sharedPreferencesName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)

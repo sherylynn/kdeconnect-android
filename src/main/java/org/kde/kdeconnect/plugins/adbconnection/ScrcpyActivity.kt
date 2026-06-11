@@ -6,10 +6,13 @@ import android.media.MediaFormat
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
+import android.view.View
 import android.widget.Button
-import android.widget.TextView
+import android.widget.ImageButton
+import android.widget.LinearLayout
 import androidx.appcompat.app.AppCompatActivity
 import org.kde.kdeconnect_tp.R
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputSurfaceView
@@ -22,10 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputSurfaceView.InputCallbacks {
 
     private lateinit var surfaceView: ScrcpyInputSurfaceView
-    private lateinit var statusText: TextView
-    private lateinit var disconnectButton: Button
-    private lateinit var backButton: Button
-    private lateinit var homeButton: Button
+    private lateinit var floatingButton: ImageButton
+    private lateinit var floatingMenu: LinearLayout
 
     private var decoder: MediaCodec? = null
     private var scrcpySession: ScrcpySession? = null
@@ -38,6 +39,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
 
     private var host: String = ""
     private var port: Int = 0
+    private var prefsName: String = ""
     private var touchEventHandler: TouchEventHandler? = null
     private val gotOutputFormat = AtomicBoolean(false)
 
@@ -45,24 +47,45 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scrcpy)
         surfaceView = findViewById(R.id.surface_view)
-        statusText = findViewById(R.id.status_text)
-        disconnectButton = findViewById(R.id.disconnect_button)
-        backButton = findViewById(R.id.back_button)
-        homeButton = findViewById(R.id.home_button)
+        floatingButton = findViewById(R.id.floating_button)
+        floatingMenu = findViewById(R.id.floating_menu)
         surfaceView.holder.addCallback(this)
         surfaceView.inputCallbacks = this
         surfaceView.setCommitTextEnabled(true)
-        disconnectButton.setOnClickListener { stopScrcpy(); finish() }
-        backButton.setOnClickListener { scrcpySession?.sendBack() }
-        homeButton.setOnClickListener { scrcpySession?.sendHome() }
+
         host = intent.getStringExtra(EXTRA_HOST) ?: ""
         port = intent.getIntExtra(EXTRA_PORT, 0)
-        Log.i(TAG, "onCreate: host=$host, port=$port")
-        if (host.isEmpty() || port == 0) {
-            statusText.text = "Error: Invalid connection parameters"
-            return
+        prefsName = intent.getStringExtra(EXTRA_PREFS_NAME) ?: ""
+        Log.i(TAG, "onCreate: host=$host, port=$port, prefs=$prefsName")
+        if (host.isEmpty() || port == 0) { finish(); return }
+
+        // Floating button setup
+        floatingButton.setOnClickListener {
+            floatingMenu.visibility = if (floatingMenu.visibility == View.VISIBLE) View.GONE else View.VISIBLE
         }
-        statusText.text = "Connecting to $host:$port..."
+        floatingMenu.findViewById<Button>(R.id.floating_back).setOnClickListener {
+            scrcpySession?.sendBack(); floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_home).setOnClickListener {
+            scrcpySession?.sendHome(); floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_app_switch).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_power).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+            floatingMenu.visibility = View.GONE
+        }
+
+        // Hide system bars for fullscreen
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_FULLSCREEN or
+            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        )
     }
 
     override fun surfaceCreated(holder: SurfaceHolder) { surface = holder.surface; startScrcpy() }
@@ -84,7 +107,20 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         return true
     }
 
-    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+    /**
+     * Intercept touch events. If touch is on floating button/menu, let the normal
+     * view hierarchy handle it. Otherwise, send to scrcpy session.
+     */
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        // Check if touch is on floating button or menu - let them handle it normally
+        if (isTouchOnView(floatingButton, event) || isTouchOnView(floatingMenu, event)) {
+            return super.dispatchTouchEvent(event)
+        }
+        // Hide floating menu when touching elsewhere
+        if (floatingMenu.visibility == View.VISIBLE) {
+            floatingMenu.visibility = View.GONE
+        }
+        // Send to scrcpy session
         val handler = touchEventHandler
         if (handler != null && isRunning) {
             handler.updateDimensions(surfaceView.width, surfaceView.height)
@@ -92,6 +128,15 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             return true
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    private fun isTouchOnView(view: View, event: MotionEvent): Boolean {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        val x = event.rawX
+        val y = event.rawY
+        return x >= location[0] && x <= location[0] + view.width &&
+               y >= location[1] && y <= location[1] + view.height
     }
 
     private fun createDecoder(width: Int, height: Int) {
@@ -153,17 +198,17 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private fun startScrcpy() {
         Thread {
             try {
-                if (host.isEmpty() || port == 0) { runOnUiThread { statusText.text = "Error: Invalid connection parameters" }; return@Thread }
                 Log.i(TAG, "Connecting to $host:$port...")
-                val session = ScrcpySession(host, port, this@ScrcpyActivity)
-                if (!session.start()) { runOnUiThread { statusText.text = "Failed to start scrcpy" }; return@Thread }
+                val session = ScrcpySession(host, port, this@ScrcpyActivity, prefsName)
+                if (!session.start()) { finish(); return@Thread }
                 Log.i(TAG, "Scrcpy started: device=${session.deviceName}")
                 scrcpySession = session
                 screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0
                 screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
 
-                // Turn screen off if requested (like ScrcpyForAndroid)
-                val turnScreenOff = getSharedPreferences("kdeconnect_prefs", MODE_PRIVATE).getBoolean("scrcpy_turn_screen_off", false)
+                // Read turn screen off setting
+                val settings = if (prefsName.isNotBlank()) getSharedPreferences(prefsName, MODE_PRIVATE) else null
+                val turnScreenOff = settings?.getBoolean("scrcpy_turn_screen_off", false) ?: false
                 if (turnScreenOff) {
                     Log.i(TAG, "Turning off remote screen...")
                     session.setDisplayPower(false)
@@ -176,7 +221,10 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 Log.i(TAG, "View: ${viewWidth}x${viewHeight}, Session: ${screenWidth}x${screenHeight}")
 
                 if (screenWidth > 0 && screenHeight > 0) {
-                    runOnUiThread { requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT }
+                    runOnUiThread {
+                        surfaceView.setVideoDimensions(screenWidth, screenHeight)
+                        requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    }
                 }
 
                 touchEventHandler = TouchEventHandler(
@@ -190,9 +238,8 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                     },
                     onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
                 )
-                runOnUiThread { statusText.text = "Connected to ${session.deviceName}"; surfaceView.requestFocus() }
                 decodeVideo(session)
-            } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); runOnUiThread { statusText.text = "Error: ${e.message}" } }
+            } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); finish() }
         }.start()
     }
 
@@ -206,6 +253,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                     if (decoderConfigured && (packet.width != screenWidth || packet.height != screenHeight)) { gotOutputFormat.set(false); createDecoder(packet.width, packet.height) }
                     else if (!decoderConfigured) { createDecoder(packet.width, packet.height) }
                     runOnUiThread {
+                        surfaceView.setVideoDimensions(screenWidth, screenHeight)
                         requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                         touchEventHandler?.updateSessionDimensions(screenWidth, screenHeight)
                     }
@@ -230,5 +278,6 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         const val EXTRA_HOST = "host"
         const val EXTRA_PORT = "port"
         const val EXTRA_DEVICE_ID = "device_id"
+        const val EXTRA_PREFS_NAME = "prefs_name"
     }
 }

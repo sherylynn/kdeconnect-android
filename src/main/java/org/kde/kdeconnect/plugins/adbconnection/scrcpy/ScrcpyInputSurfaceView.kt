@@ -8,6 +8,7 @@ import android.view.SurfaceView
 import android.view.inputmethod.BaseInputConnection
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import kotlin.math.min
 
 class ScrcpyInputSurfaceView @JvmOverloads constructor(
     context: Context,
@@ -23,12 +24,50 @@ class ScrcpyInputSurfaceView @JvmOverloads constructor(
 
     var inputCallbacks: InputCallbacks? = null
     private var commitTextEnabled = false
+    private var videoWidth: Int = 0
+    private var videoHeight: Int = 0
 
     fun setCommitTextEnabled(enabled: Boolean) {
         commitTextEnabled = enabled
         isFocusable = enabled
         isFocusableInTouchMode = enabled
         if (enabled) requestFocus() else clearFocus()
+    }
+
+    fun setVideoDimensions(width: Int, height: Int) {
+        if (width > 0 && height > 0 && (width != videoWidth || height != videoHeight)) {
+            videoWidth = width
+            videoHeight = height
+            requestLayout()
+        }
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val parentWidth = MeasureSpec.getSize(widthMeasureSpec)
+        val parentHeight = MeasureSpec.getSize(heightMeasureSpec)
+
+        if (videoWidth <= 0 || videoHeight <= 0) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            return
+        }
+
+        val videoAspect = videoWidth.toFloat() / videoHeight.toFloat()
+        val parentAspect = parentWidth.toFloat() / parentHeight.toFloat()
+
+        val width: Int
+        val height: Int
+        if (videoAspect > parentAspect) {
+            width = parentWidth
+            height = (parentWidth / videoAspect).toInt()
+        } else {
+            height = parentHeight
+            width = (parentHeight * videoAspect).toInt()
+        }
+
+        setMeasuredDimension(
+            min(width, parentWidth),
+            min(height, parentHeight),
+        )
     }
 
     override fun onCheckIsTextEditor(): Boolean {

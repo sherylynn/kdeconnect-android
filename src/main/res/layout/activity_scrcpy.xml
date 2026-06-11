@@ -8,61 +8,69 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Floating control button -->
+    <ImageButton
+        android:id="@+id/floating_button"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="8dp"
+        android:src="@android:drawable/ic_menu_more"
+        android:background="@drawable/floating_button_bg"
+        android:scaleType="centerInside"
+        android:contentDescription="@string/scrcpy_floating_button" />
+
+    <!-- Floating button popup -->
     <LinearLayout
-        android:layout_width="match_parent"
+        android:id="@+id/floating_menu"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
+        android:layout_gravity="end|center_vertical"
+        android:layout_marginEnd="64dp"
         android:orientation="vertical"
-        android:layout_gravity="top"
+        android:background="#CC000000"
         android:padding="8dp"
-        android:background="#80000000">
+        android:visibility="gone">
 
-        <TextView
-            android:id="@+id/status_text"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:textColor="@android:color/white"
-            android:textSize="14sp"
-            android:text="@string/scrcpy_connecting" />
-
-        <LinearLayout
+        <Button
+            android:id="@+id/floating_back"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="8dp">
+            android:text="@string/scrcpy_back"
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:background="#00000000"
+            android:minHeight="36dp" />
 
-            <Button
-                android:id="@+id/back_button"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/scrcpy_back"
-                android:textSize="12sp"
-                android:minWidth="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp" />
+        <Button
+            android:id="@+id/floating_home"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/scrcpy_home"
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:background="#00000000"
+            android:minHeight="36dp" />
 
-            <Button
-                android:id="@+id/home_button"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/scrcpy_home"
-                android:textSize="12sp"
-                android:minWidth="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:layout_marginStart="8dp" />
+        <Button
+            android:id="@+id/floating_app_switch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/scrcpy_app_switch"
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:background="#00000000"
+            android:minHeight="36dp" />
 
-            <Button
-                android:id="@+id/disconnect_button"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/scrcpy_disconnect"
-                android:textSize="12sp"
-                android:minWidth="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
-                android:layout_marginStart="8dp" />
-
-        </LinearLayout>
+        <Button
+            android:id="@+id/floating_power"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/scrcpy_power"
+            android:textSize="12sp"
+            android:textColor="@android:color/white"
+            android:background="#00000000"
+            android:minHeight="36dp" />
 
     </LinearLayout>
 

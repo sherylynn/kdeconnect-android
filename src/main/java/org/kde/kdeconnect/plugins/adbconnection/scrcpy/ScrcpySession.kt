@@ -15,6 +15,7 @@ class ScrcpySession(
     private val adbHost: String,
     private val adbPort: Int,
     private val context: Context,
+    private val prefsName: String = "",
 ) {
     companion object {
         private const val TAG = "ScrcpySession"
@@ -134,7 +135,11 @@ class ScrcpySession(
             val scid = (Math.random() * 0x7FFFFFFF).toInt().toUInt()
 
             // Read settings from SharedPreferences
-            val settings = context.getSharedPreferences("kdeconnect_prefs", Context.MODE_PRIVATE)
+            val settings = if (prefsName.isNotBlank()) {
+                context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
+            } else {
+                context.getSharedPreferences("kdeconnect_prefs", Context.MODE_PRIVATE)
+            }
             val videoCodec = Shared.Codec.fromString(
                 settings.getString("scrcpy_video_codec", "h264") ?: "h264"
             )
