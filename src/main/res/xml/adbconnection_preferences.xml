@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <EditTextPreference
+        android:key="adb_host"
+        android:title="@string/adb_host"
+        android:summary="@string/adb_host_summary"
+        android:defaultValue="192.168.1.100"
+        android:dialogTitle="@string/adb_host_dialog"
+        app:key="adb_host" />
+
+    <EditTextPreference
+        android:key="adb_port"
+        android:title="@string/adb_port"
+        android:summary="@string/adb_port_summary"
+        android:defaultValue="5555"
+        android:dialogTitle="@string/adb_port_dialog"
+        android:inputType="number"
+        app:key="adb_port" />
+
+    <SwitchPreferenceCompat
+        android:key="auto_connect"
+        android:title="@string/adb_auto_connect"
+        android:summary="@string/adb_auto_connect_summary"
+        android:defaultValue="false"
+        app:key="auto_connect" />
+
+</PreferenceScreen>

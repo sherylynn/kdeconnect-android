@@ -309,6 +309,22 @@ class Device : PacketReceiver {
     val isReachable: Boolean
         get() = links.isNotEmpty()
 
+    /**
+     * Returns the remote IP address of the first active link, or null if unavailable.
+     */
+    fun getHostAddress(): String? {
+        val link = links.firstOrNull() ?: return null
+        return try {
+            val clazz = link.javaClass
+            val socketField = clazz.getDeclaredField("socket")
+            socketField.isAccessible = true
+            val socket = socketField.get(link) as? javax.net.ssl.SSLSocket ?: return null
+            (socket.remoteSocketAddress as? java.net.InetSocketAddress)?.address?.hostAddress
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun addLink(link: BaseLink) {
         synchronized(sendChannel) {
             if (sendCoroutine == null) {
