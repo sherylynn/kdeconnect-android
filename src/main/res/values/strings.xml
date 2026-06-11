@@ -678,4 +678,28 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="presenter_volume_keys_foreground_tip">You can leave the screen on to use the volume keys to go to the previous/next slide</string>
     <string name="presenter_volume_keys_tip">You can leave the screen on or lock your device to use the volume keys to go to the previous/next slide</string>
 
+    <!-- Scrcpy Settings -->
+    <string name="scrcpy_settings_category">Scrcpy Settings</string>
+    <string name="scrcpy_video_codec">Video Codec</string>
+    <string name="scrcpy_video_codec_summary">Select video encoding codec</string>
+    <string name="scrcpy_max_size">Max Size</string>
+    <string name="scrcpy_max_size_summary">Limit video dimension (0 = no limit)</string>
+    <string name="scrcpy_max_size_dialog">Enter max size (pixels)</string>
+    <string name="scrcpy_max_fps">Max FPS</string>
+    <string name="scrcpy_max_fps_summary">Limit frame rate (empty = no limit)</string>
+    <string name="scrcpy_max_fps_dialog">Enter max FPS</string>
+    <string name="scrcpy_video_bit_rate">Video Bit Rate</string>
+    <string name="scrcpy_video_bit_rate_summary">Video encoding bit rate in bps (0 = default)</string>
+    <string name="scrcpy_video_bit_rate_dialog">Enter bit rate</string>
+    <string name="scrcpy_control">Enable Control</string>
+    <string name="scrcpy_control_summary">Allow touch and key input on remote device</string>
+    <string name="scrcpy_clipboard_sync">Clipboard Sync</string>
+    <string name="scrcpy_clipboard_sync_summary">Synchronize clipboard between devices</string>
+    <string name="scrcpy_key_inject_mode">Key Inject Mode</string>
+    <string name="scrcpy_key_inject_mode_summary">How to inject key events</string>
+    <string name="scrcpy_stay_awake">Stay Awake</string>
+    <string name="scrcpy_stay_awake_summary">Keep remote device screen on</string>
+    <string name="scrcpy_turn_screen_off">Turn Screen Off</string>
+    <string name="scrcpy_turn_screen_off_summary">Turn off remote device screen while mirroring</string>
+
 </resources>

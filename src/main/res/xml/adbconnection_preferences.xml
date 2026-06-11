@@ -26,4 +26,82 @@
         android:defaultValue="false"
         app:key="auto_connect" />
 
+    <PreferenceCategory
+        android:title="@string/scrcpy_settings_category">
+
+        <ListPreference
+            android:key="scrcpy_video_codec"
+            android:title="@string/scrcpy_video_codec"
+            android:summary="@string/scrcpy_video_codec_summary"
+            android:entries="@array/scrcpy_video_codec_entries"
+            android:entryValues="@array/scrcpy_video_codec_values"
+            android:defaultValue="h264"
+            app:key="scrcpy_video_codec" />
+
+        <EditTextPreference
+            android:key="scrcpy_max_size"
+            android:title="@string/scrcpy_max_size"
+            android:summary="@string/scrcpy_max_size_summary"
+            android:defaultValue="0"
+            android:dialogTitle="@string/scrcpy_max_size_dialog"
+            android:inputType="number"
+            app:key="scrcpy_max_size" />
+
+        <EditTextPreference
+            android:key="scrcpy_max_fps"
+            android:title="@string/scrcpy_max_fps"
+            android:summary="@string/scrcpy_max_fps_summary"
+            android:defaultValue=""
+            android:dialogTitle="@string/scrcpy_max_fps_dialog"
+            android:inputType="number"
+            app:key="scrcpy_max_fps" />
+
+        <EditTextPreference
+            android:key="scrcpy_video_bit_rate"
+            android:title="@string/scrcpy_video_bit_rate"
+            android:summary="@string/scrcpy_video_bit_rate_summary"
+            android:defaultValue="0"
+            android:dialogTitle="@string/scrcpy_video_bit_rate_dialog"
+            android:inputType="number"
+            app:key="scrcpy_video_bit_rate" />
+
+        <SwitchPreferenceCompat
+            android:key="scrcpy_control"
+            android:title="@string/scrcpy_control"
+            android:summary="@string/scrcpy_control_summary"
+            android:defaultValue="true"
+            app:key="scrcpy_control" />
+
+        <SwitchPreferenceCompat
+            android:key="scrcpy_clipboard_sync"
+            android:title="@string/scrcpy_clipboard_sync"
+            android:summary="@string/scrcpy_clipboard_sync_summary"
+            android:defaultValue="true"
+            app:key="scrcpy_clipboard_sync" />
+
+        <ListPreference
+            android:key="scrcpy_key_inject_mode"
+            android:title="@string/scrcpy_key_inject_mode"
+            android:summary="@string/scrcpy_key_inject_mode_summary"
+            android:entries="@array/scrcpy_key_inject_entries"
+            android:entryValues="@array/scrcpy_key_inject_values"
+            android:defaultValue="mixed"
+            app:key="scrcpy_key_inject_mode" />
+
+        <SwitchPreferenceCompat
+            android:key="scrcpy_stay_awake"
+            android:title="@string/scrcpy_stay_awake"
+            android:summary="@string/scrcpy_stay_awake_summary"
+            android:defaultValue="false"
+            app:key="scrcpy_stay_awake" />
+
+        <SwitchPreferenceCompat
+            android:key="scrcpy_turn_screen_off"
+            android:title="@string/scrcpy_turn_screen_off"
+            android:summary="@string/scrcpy_turn_screen_off_summary"
+            android:defaultValue="false"
+            app:key="scrcpy_turn_screen_off" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

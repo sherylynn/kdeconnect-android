@@ -35,6 +35,7 @@ class ScrcpySession(
         private const val TYPE_INJECT_TOUCH_EVENT = 2
         private const val TYPE_INJECT_SCROLL_EVENT = 3
         private const val TYPE_BACK_OR_SCREEN_ON = 4
+        private const val TYPE_SET_DISPLAY_POWER = 10
 
         private fun socketNameFor(scid: Int): String = "scrcpy_%08x".format(scid)
     }
@@ -131,10 +132,37 @@ class ScrcpySession(
 
             // Build server command using ClientOptions → ServerParams, exactly like ScrcpyForAndroid
             val scid = (Math.random() * 0x7FFFFFFF).toInt().toUInt()
+
+            // Read settings from SharedPreferences
+            val settings = context.getSharedPreferences("kdeconnect_prefs", Context.MODE_PRIVATE)
+            val videoCodec = Shared.Codec.fromString(
+                settings.getString("scrcpy_video_codec", "h264") ?: "h264"
+            )
+            val maxSize = (settings.getString("scrcpy_max_size", "0") ?: "0").toUShortOrNull() ?: 0u
+            val maxFps = settings.getString("scrcpy_max_fps", "") ?: ""
+            val videoBitRate = (settings.getString("scrcpy_video_bit_rate", "0") ?: "0").toIntOrNull() ?: 0
+            val control = settings.getBoolean("scrcpy_control", true)
+            val clipboardSync = settings.getBoolean("scrcpy_clipboard_sync", true)
+            val keyInjectMode = ClientOptions.KeyInjectMode.fromString(
+                settings.getString("scrcpy_key_inject_mode", "mixed") ?: "mixed"
+            )
+            val stayAwake = settings.getBoolean("scrcpy_stay_awake", false)
+            val turnScreenOff = settings.getBoolean("scrcpy_turn_screen_off", false)
+
+            Log.i(TAG, "Settings: codec=$videoCodec, maxSize=$maxSize, maxFps=$maxFps, bitRate=$videoBitRate, control=$control")
+
             val options = ClientOptions(
                 video = true,
                 audio = false,
-                control = true,
+                control = control,
+                videoCodec = videoCodec,
+                maxSize = maxSize,
+                maxFps = maxFps,
+                videoBitRate = videoBitRate,
+                clipboardAutosync = clipboardSync,
+                keyInjectMode = keyInjectMode,
+                stayAwake = stayAwake,
+                turnScreenOff = turnScreenOff,
                 logLevel = Shared.LogLevel.INFO,
             ).validate()
             val serverParams = options.toServerParams(scid)
@@ -260,14 +288,24 @@ class ScrcpySession(
     fun sendKeyEvent(action: Int, keycode: Int, metaState: Int = 0) {
         val output = controlOutput ?: return
         try {
-            synchronized(output) {
-                output.writeByte(TYPE_INJECT_KEYCODE)
-                output.writeByte(action)
-                output.writeInt(keycode)
-                output.writeInt(0)
-                output.writeInt(metaState)
-                output.flush()
-            }
+            val buf = java.io.ByteArrayOutputStream(14)
+            val dos = java.io.DataOutputStream(buf)
+            dos.writeByte(TYPE_INJECT_KEYCODE)
+            dos.writeByte(action)
+            dos.writeInt(keycode)
+            dos.writeInt(0)
+            dos.writeInt(metaState)
+            dos.flush()
+            Thread {
+                try {
+                    synchronized(output) {
+                        output.write(buf.toByteArray())
+                        output.flush()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "sendKeyEvent write failed", e)
+                }
+            }.start()
         } catch (e: Exception) {
             Log.e(TAG, "sendKeyEvent failed", e)
         }
@@ -276,23 +314,36 @@ class ScrcpySession(
     fun sendTouchEvent(
         action: Int, pointerId: Long, x: Int, y: Int,
         screenWidth: Int, screenHeight: Int, pressure: Float = 1f,
-        actionButton: Int = 1, buttons: Int = 0,
+        actionButton: Int = 0, buttons: Int = 0,
     ) {
         val output = controlOutput ?: return
         try {
-            synchronized(output) {
-                output.writeByte(TYPE_INJECT_TOUCH_EVENT)
-                output.writeByte(action)
-                output.writeLong(pointerId)
-                output.writeInt(x)
-                output.writeInt(y)
-                output.writeShort(screenWidth)
-                output.writeShort(screenHeight)
-                output.writeShort(encodeUnsignedFixedPoint16(pressure))
-                output.writeInt(actionButton)
-                output.writeInt(buttons)
-                output.flush()
+            val buf = synchronized(output) {
+                val buf = java.io.ByteArrayOutputStream(32)
+                val dos = java.io.DataOutputStream(buf)
+                dos.writeByte(TYPE_INJECT_TOUCH_EVENT)
+                dos.writeByte(action)
+                dos.writeLong(pointerId)
+                dos.writeInt(x)
+                dos.writeInt(y)
+                dos.writeShort(screenWidth)
+                dos.writeShort(screenHeight)
+                dos.writeShort(encodeUnsignedFixedPoint16(pressure))
+                dos.writeInt(actionButton)
+                dos.writeInt(buttons)
+                dos.flush()
+                buf.toByteArray()
             }
+            Thread {
+                try {
+                    synchronized(output) {
+                        output.write(buf)
+                        output.flush()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "sendTouchEvent write failed", e)
+                }
+            }.start()
         } catch (e: Exception) {
             Log.e(TAG, "sendTouchEvent failed", e)
         }
@@ -300,6 +351,25 @@ class ScrcpySession(
 
     fun sendBack() { sendKeyEvent(1, 4); sendKeyEvent(0, 4) }
     fun sendHome() { sendKeyEvent(1, 3); sendKeyEvent(0, 3) }
+
+    fun setDisplayPower(on: Boolean) {
+        val output = controlOutput ?: return
+        try {
+            val buf = java.io.ByteArrayOutputStream(2)
+            val dos = java.io.DataOutputStream(buf)
+            dos.writeByte(TYPE_SET_DISPLAY_POWER)
+            dos.writeBoolean(on)
+            dos.flush()
+            Thread {
+                try {
+                    synchronized(output) {
+                        output.write(buf.toByteArray())
+                        output.flush()
+                    }
+                } catch (e: Exception) { Log.e(TAG, "setDisplayPower write failed", e) }
+            }.start()
+        } catch (e: Exception) { Log.e(TAG, "setDisplayPower failed", e) }
+    }
 
     fun stop() { closed = true; isRunning = false; cleanup() }
 
