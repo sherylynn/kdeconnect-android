@@ -6,6 +6,7 @@ import android.content.pm.ActivityInfo
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
+import android.provider.Settings
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -17,6 +18,7 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.View
 import android.widget.Button
+import android.widget.Toast
 import android.widget.GridLayout
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -518,13 +520,19 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     }
 
     private fun switchToFloating() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            Toast.makeText(this, "需要悬浮窗权限", Toast.LENGTH_SHORT).show()
+            val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:$packageName"))
+            startActivity(intent)
+            return
+        }
         val intent = Intent(this, ScrcpyFloatingActivity::class.java).apply {
             putExtra(ScrcpyFloatingActivity.EXTRA_HOST, host)
             putExtra(ScrcpyFloatingActivity.EXTRA_PORT, port)
             putExtra(ScrcpyFloatingActivity.EXTRA_PREFS_NAME, prefsName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
-        // Stop current session before switching
         isRunning = false
         releaseDecoder()
         scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null

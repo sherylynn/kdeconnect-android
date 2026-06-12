@@ -2,13 +2,13 @@ package org.kde.kdeconnect.plugins.adbconnection
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.PixelFormat
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
@@ -21,6 +21,7 @@ import android.widget.EditText
 import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.Toast
 import org.kde.kdeconnect_tp.R
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputSurfaceView
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
@@ -41,7 +42,6 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
     private lateinit var dragBar: View
     private lateinit var navBar: LinearLayout
     private lateinit var controlBar: GridLayout
-    private lateinit var editText: EditText
 
     private var scrcpySession: ScrcpySession? = null
     private var decoder: MediaCodec? = null
@@ -57,11 +57,6 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
     private var host = ""
     private var port = 0
     private var prefsName = ""
-
-    // Floating window
-    private lateinit var windowManager: WindowManager
-    private lateinit var layoutParams: WindowManager.LayoutParams
-    private var controlBarVisible = false
 
     private val decoderCallback = object : MediaCodec.Callback() {
         override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
@@ -91,14 +86,12 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         prefsName = intent.getStringExtra(EXTRA_PREFS_NAME) ?: ""
         if (host.isEmpty() || port == 0) { finish(); return }
 
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         setContentView(R.layout.activity_scrcpy_floating)
 
         surfaceView = findViewById(R.id.floatingSurfaceView)
         dragBar = findViewById(R.id.dragBar)
         navBar = findViewById(R.id.floatingNavBar)
         controlBar = findViewById(R.id.controlBar)
-        editText = findViewById(R.id.editText)
 
         surfaceView.holder.addCallback(this)
         surfaceView.inputCallbacks = this
@@ -110,32 +103,25 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
     }
 
     private fun setupFloatingWindow() {
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        else
-            @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        window.setGravity(Gravity.TOP or Gravity.START)
+        window.setLayout(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT)
+        window.setBackgroundDrawableResource(android.R.color.transparent)
 
-        layoutParams = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            type,
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.START or Gravity.TOP
-            x = 50
-            y = 200
+        val lp = window.attributes
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.x = 50
+        lp.y = 200
+        lp.width = WindowManager.LayoutParams.WRAP_CONTENT
+        lp.height = WindowManager.LayoutParams.WRAP_CONTENT
+        lp.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            lp.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            lp.type = WindowManager.LayoutParams.TYPE_PHONE
         }
-
-        try {
-            windowManager.addView(window.decorView, layoutParams)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to add floating window", e)
-            finish()
-        }
+        window.attributes = lp
     }
 
     private fun setupDragBar() {
@@ -148,8 +134,10 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         dragBar.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialX = layoutParams.x
-                    initialY = layoutParams.y
+                    val loc = IntArray(2)
+                    window.decorView.getLocationOnScreen(loc)
+                    initialX = loc[0]
+                    initialY = loc[1]
                     lastX = event.rawX.toInt()
                     lastY = event.rawY.toInt()
                     isDragging = false
@@ -160,9 +148,10 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
                     val dy = event.rawY.toInt() - lastY
                     if (!isDragging && (dx * dx + dy * dy > 625)) isDragging = true
                     if (isDragging) {
-                        layoutParams.x = initialX + (event.rawX.toInt() - lastX)
-                        layoutParams.y = initialY + (event.rawY.toInt() - lastY)
-                        try { windowManager.updateViewLayout(window.decorView, layoutParams) } catch (_: Exception) {}
+                        val lp = window.attributes
+                        lp.x = initialX + dx
+                        lp.y = initialY + dy
+                        window.attributes = lp
                     }
                     true
                 }
@@ -176,28 +165,29 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
     }
 
     private fun toggleControlBar() {
-        controlBarVisible = !controlBarVisible
-        controlBar.visibility = if (controlBarVisible) View.VISIBLE else View.GONE
-        navBar.visibility = if (controlBarVisible && navBar.tag == "visible") View.VISIBLE else View.GONE
+        val visible = controlBar.visibility == View.GONE
+        controlBar.visibility = if (visible) View.VISIBLE else View.GONE
+        if (visible) {
+            navBar.visibility = View.GONE
+        }
     }
 
     private fun setupControlBar() {
-        val session = scrcpySession
         findViewById<ImageView>(R.id.btnBack).setOnClickListener {
-            session?.sendBack()
+            scrcpySession?.sendBack()
         }
         findViewById<ImageView>(R.id.btnHome).setOnClickListener {
-            session?.sendHome()
+            scrcpySession?.sendHome()
         }
         findViewById<ImageView>(R.id.btnSwitch).setOnClickListener {
-            session?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
-            session?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
         }
         findViewById<ImageView>(R.id.btnRotate).setOnClickListener {
-            session?.rotateDevice()
+            scrcpySession?.rotateDevice()
         }
         findViewById<ImageView>(R.id.btnPower).setOnClickListener {
-            session?.lockDevice()
+            scrcpySession?.lockDevice()
         }
         findViewById<ImageView>(R.id.btnFullscreen).setOnClickListener {
             val intent = Intent(this, ScrcpyActivity::class.java).apply {
@@ -212,7 +202,6 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         }
         findViewById<ImageView>(R.id.btnNavBar).setOnClickListener {
             navBar.visibility = if (navBar.visibility == View.GONE) View.VISIBLE else View.GONE
-            navBar.tag = if (navBar.visibility == View.VISIBLE) "visible" else null
         }
         findViewById<ImageView>(R.id.btnClose).setOnClickListener {
             stopScrcpy()
@@ -300,14 +289,14 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         while (isRunning) {
             val packet = session.readVideoPacket() ?: break
             val now = System.currentTimeMillis()
+            val gapMs = now - lastPacketTime
 
             if (packet.isSession) {
                 if (packet.width > 0 && packet.height > 0) {
                     val newW = packet.width; val newH = packet.height
                     val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
-                    val wasGapped = now - lastPacketTime > 300
                     screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured || wasGapped) {
+                    if (sizeChanged || !decoderConfigured) {
                         createDecoder(newW, newH)
                         waitingForKeyFrame = true
                     }
@@ -316,7 +305,8 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
                 continue
             }
 
-            if (decoderConfigured && (now - lastPacketTime > 300)) {
+            if (gapMs > 200 && decoderConfigured) {
+                createDecoder(screenWidth, screenHeight)
                 waitingForKeyFrame = true
             }
             lastPacketTime = now
@@ -378,11 +368,5 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
     override fun onDestroy() {
         super.onDestroy()
         stopScrcpy()
-        try { windowManager.removeView(window.decorView) } catch (_: Exception) {}
-    }
-
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        // Keep floating when user navigates away
     }
 }
