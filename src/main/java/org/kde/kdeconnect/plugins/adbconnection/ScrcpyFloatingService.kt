@@ -143,9 +143,9 @@ class ScrcpyFloatingService : Service() {
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.CENTER
-            x = 0
-            y = 0
+            gravity = Gravity.TOP or Gravity.START
+            x = (screenW - initW) / 2
+            y = (screenH - initH) / 2
         }
 
         setupTextureView()
