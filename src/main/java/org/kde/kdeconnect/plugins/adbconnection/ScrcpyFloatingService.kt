@@ -171,7 +171,10 @@ class ScrcpyFloatingService : Service() {
                 startScrcpy()
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                // TextureView scales automatically — do nothing
+                // Keep buffer at remote device resolution — decoder must not be interrupted
+                if (screenWidth > 0 && screenHeight > 0) {
+                    st.setDefaultBufferSize(screenWidth, screenHeight)
+                }
             }
             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                 return false
