@@ -33,10 +33,18 @@ class ScrcpySession(
         private const val PACKET_PTS_MASK = (1L shl 61) - 1
 
         private const val TYPE_INJECT_KEYCODE = 0
+        private const val TYPE_INJECT_TEXT = 1
         private const val TYPE_INJECT_TOUCH_EVENT = 2
         private const val TYPE_INJECT_SCROLL_EVENT = 3
         private const val TYPE_BACK_OR_SCREEN_ON = 4
+        private const val TYPE_EXPAND_NOTIFICATION_PANEL = 5
+        private const val TYPE_EXPAND_SETTINGS_PANEL = 6
+        private const val TYPE_COLLAPSE_PANELS = 7
+        private const val TYPE_GET_CLIPBOARD = 8
+        private const val TYPE_SET_CLIPBOARD = 9
         private const val TYPE_SET_DISPLAY_POWER = 10
+        private const val TYPE_ROTATE_DEVICE = 11
+        private const val TYPE_START_APP = 16
 
         private fun socketNameFor(scid: Int): String = "scrcpy_%08x".format(scid)
     }
@@ -379,6 +387,87 @@ class ScrcpySession(
             Log.i(TAG, "setDisplayPower($on) sent")
         } catch (e: Exception) {
             Log.e(TAG, "setDisplayPower failed", e)
+        }
+    }
+
+    fun sendText(text: String) {
+        val output = controlOutput ?: return
+        try {
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            synchronized(output) {
+                output.writeByte(TYPE_INJECT_TEXT)
+                output.writeInt(bytes.size)
+                output.write(bytes)
+                output.flush()
+            }
+            Log.i(TAG, "sendText sent")
+        } catch (e: Exception) {
+            Log.e(TAG, "sendText failed", e)
+        }
+    }
+
+    fun expandNotificationPanel() {
+        val output = controlOutput ?: return
+        try {
+            synchronized(output) {
+                output.writeByte(TYPE_EXPAND_NOTIFICATION_PANEL)
+                output.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "expandNotificationPanel failed", e)
+        }
+    }
+
+    fun expandSettingsPanel() {
+        val output = controlOutput ?: return
+        try {
+            synchronized(output) {
+                output.writeByte(TYPE_EXPAND_SETTINGS_PANEL)
+                output.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "expandSettingsPanel failed", e)
+        }
+    }
+
+    fun collapsePanels() {
+        val output = controlOutput ?: return
+        try {
+            synchronized(output) {
+                output.writeByte(TYPE_COLLAPSE_PANELS)
+                output.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "collapsePanels failed", e)
+        }
+    }
+
+    fun rotateDevice() {
+        val output = controlOutput ?: return
+        try {
+            synchronized(output) {
+                output.writeByte(TYPE_ROTATE_DEVICE)
+                output.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "rotateDevice failed", e)
+        }
+    }
+
+    fun setClipboard(text: String, paste: Boolean) {
+        val output = controlOutput ?: return
+        try {
+            val bytes = text.toByteArray(Charsets.UTF_8)
+            synchronized(output) {
+                output.writeByte(TYPE_SET_CLIPBOARD)
+                output.writeLong(0L) // sequence invalid
+                output.writeByte(if (paste) 1 else 0)
+                output.writeInt(bytes.size)
+                output.write(bytes)
+                output.flush()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "setClipboard failed", e)
         }
     }
 

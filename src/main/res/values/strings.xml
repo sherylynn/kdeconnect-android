@@ -704,5 +704,18 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="scrcpy_floating_button">Control</string>
     <string name="scrcpy_app_switch">App Switch</string>
     <string name="scrcpy_power">Power</string>
+    <string name="scrcpy_volume_up">Vol+</string>
+    <string name="scrcpy_volume_down">Vol-</string>
+    <string name="scrcpy_volume_mute">Mute</string>
+    <string name="scrcpy_menu">Menu</string>
+    <string name="scrcpy_notification">Notif</string>
+    <string name="scrcpy_screenshot">Shot</string>
+    <string name="scrcpy_rotate">Rotate</string>
+    <string name="scrcpy_expand_notif">NotifPanel</string>
+    <string name="scrcpy_expand_settings">SettingsPanel</string>
+    <string name="scrcpy_collapse_panels">Collapse</string>
+    <string name="scrcpy_file_manager">File Manager</string>
+    <string name="scrcpy_record">Record</string>
+    <string name="scrcpy_stop_record">Stop Record</string>
 
 </resources>

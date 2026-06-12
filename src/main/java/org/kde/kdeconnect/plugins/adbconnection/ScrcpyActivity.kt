@@ -1,10 +1,13 @@
 package org.kde.kdeconnect.plugins.adbconnection
 
+import android.app.PictureInPictureParams
 import android.content.pm.ActivityInfo
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.util.Rational
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
@@ -13,6 +16,7 @@ import android.view.View
 import android.widget.Button
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
 import org.kde.kdeconnect_tp.R
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputSurfaceView
@@ -26,7 +30,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
 
     private lateinit var surfaceView: ScrcpyInputSurfaceView
     private lateinit var floatingButton: ImageButton
-    private lateinit var floatingMenu: LinearLayout
+    private lateinit var floatingMenu: ScrollView
 
     private var decoder: MediaCodec? = null
     private var scrcpySession: ScrcpySession? = null
@@ -42,6 +46,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private var prefsName: String = ""
     private var touchEventHandler: TouchEventHandler? = null
     private val gotOutputFormat = AtomicBoolean(false)
+    private var isInPipMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,6 +82,52 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         floatingMenu.findViewById<Button>(R.id.floating_power).setOnClickListener {
             scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
             scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_volume_up).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_VOLUME_UP)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_VOLUME_UP)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_volume_down).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_VOLUME_DOWN)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_VOLUME_DOWN)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_volume_mute).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_VOLUME_MUTE)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_VOLUME_MUTE)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_menu_key).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_MENU)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_MENU)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_notification).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_NOTIFICATION)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_NOTIFICATION)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_screenshot).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_SYSRQ)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_SYSRQ)
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_rotate).setOnClickListener {
+            scrcpySession?.rotateDevice()
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_expand_notif).setOnClickListener {
+            scrcpySession?.expandNotificationPanel()
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_expand_settings).setOnClickListener {
+            scrcpySession?.expandSettingsPanel()
+            floatingMenu.visibility = View.GONE
+        }
+        floatingMenu.findViewById<Button>(R.id.floating_collapse_panels).setOnClickListener {
+            scrcpySession?.collapsePanels()
             floatingMenu.visibility = View.GONE
         }
 
@@ -261,6 +312,47 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private fun stopScrcpy() {
         isRunning = false; gotOutputFormat.set(false); releaseDecoder()
         scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
+    }
+
+    // Picture-in-Picture support
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (isRunning && screenWidth > 0 && screenHeight > 0) {
+            enterPipMode()
+        }
+    }
+
+    private fun enterPipMode() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val aspectRatio = Rational(screenWidth, screenHeight)
+            val params = PictureInPictureParams.Builder()
+                .setAspectRatio(aspectRatio)
+                .build()
+            try {
+                enterPictureInPictureMode(params)
+                isInPipMode = true
+                floatingButton.visibility = View.GONE
+                floatingMenu.visibility = View.GONE
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to enter PiP mode", e)
+            }
+        }
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode)
+        isInPipMode = isInPictureInPictureMode
+        if (isInPictureInPictureMode) {
+            floatingButton.visibility = View.GONE
+            floatingMenu.visibility = View.GONE
+            window.decorView.systemUiVisibility = (
+                View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            )
+        } else {
+            floatingButton.visibility = View.VISIBLE
+        }
     }
 
     override fun onDestroy() { super.onDestroy(); stopScrcpy() }

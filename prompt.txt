@@ -1,1 +1,11 @@
 我把/root/ScrcpyForAndroid 项目的功能移植到了这个项目的插件里，现在远程控制其他设备的时候无法像原版那样熄屏控制，帮我解决问题
+
+你的理解还是错误的，每个设备的adb-key可以复用一套的，我是说只要握手成功，以后的adb-key应该复用第一次握手的adb-key
+
+把/root/ScrcpyForAndroid 项目的UI功能，尽可能全部移植到我这个项目
+
+画中画模式中虚拟按钮是失效的，另外scrcpyforandroid的虚拟按钮还有类似三大金刚键的按钮，还能编辑虚拟按钮；
+
+或者看看这个项目的ui能有什么参考移植的地方吗 /root/Easycontrol_For_Car 研究研究
+
+另外scrcpyforandroid操控还更流畅，可以设置更多细节，请继续研究移植，尽量一比一移植，jetpackcompose能直接移植吗，
