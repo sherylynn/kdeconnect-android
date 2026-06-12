@@ -21,7 +21,6 @@ import android.view.*
 import android.widget.ImageView
 import org.kde.kdeconnect_tp.R
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
-import org.kde.kdeconnect.plugins.adbconnection.scrcpy.TouchEventHandler
 
 class ScrcpyFloatingService : Service() {
 
@@ -52,7 +51,6 @@ class ScrcpyFloatingService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var codecHandler: Handler? = null
     private var codecHandlerThread: HandlerThread? = null
-    private var touchEventHandler: TouchEventHandler? = null
     private var surfaceReady = false
 
     private lateinit var layoutParams: WindowManager.LayoutParams
@@ -168,12 +166,9 @@ class ScrcpyFloatingService : Service() {
                 surfaceTexture = st
                 surface = Surface(st)
                 surfaceReady = true
-                // Ensure touch handler has correct dimensions
-                touchEventHandler?.updateDimensions(w, h)
                 startScrcpy()
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                touchEventHandler?.updateDimensions(w, h)
             }
             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                 return false
@@ -181,14 +176,30 @@ class ScrcpyFloatingService : Service() {
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
 
-        // Forward touch events to remote device using normalized coordinates
+        // Forward touch events to remote device — direct normalized coordinates (like EasyControl)
         tv.setOnTouchListener { view, event ->
-            val handler = touchEventHandler ?: return@setOnTouchListener false
+            val session = scrcpySession ?: return@setOnTouchListener false
             if (!isRunning) return@setOnTouchListener false
             val w = view.width; val h = view.height
             if (w <= 0 || h <= 0) return@setOnTouchListener false
-            handler.updateDimensions(w, h)
-            handler.handleMotionEvent(event)
+
+            val action = when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> 0
+                MotionEvent.ACTION_UP -> 1
+                MotionEvent.ACTION_MOVE -> 2
+                MotionEvent.ACTION_POINTER_DOWN -> 5
+                MotionEvent.ACTION_POINTER_UP -> 6
+                MotionEvent.ACTION_CANCEL -> 3
+                else -> return@setOnTouchListener false
+            }
+
+            for (i in 0 until event.pointerCount) {
+                val pointerId = event.getPointerId(i)
+                val x = (event.getX(i) / w * screenWidth).toInt().coerceIn(0, screenWidth - 1)
+                val y = (event.getY(i) / h * screenHeight).toInt().coerceIn(0, screenHeight - 1)
+                val pressure = event.getPressure(i).coerceIn(0f, 1f)
+                session.sendTouchEvent(action, pointerId.toLong(), x, y, screenWidth, screenHeight, pressure, 0, 0)
+            }
             true
         }
     }
@@ -276,29 +287,6 @@ class ScrcpyFloatingService : Service() {
                 screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0
                 screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
                 mainHandler.post { updateOverlaySize() }
-
-                val tv = textureView ?: return@Thread
-                // Create touch handler with session dimensions, update view dimensions later
-                mainHandler.post {
-                    val tvW = tv.width
-                    val tvH = tv.height
-                    touchEventHandler = TouchEventHandler(
-                        sessionWidth = screenWidth.takeIf { it > 0 } ?: 1920,
-                        sessionHeight = screenHeight.takeIf { it > 0 } ?: 1080,
-                        touchAreaWidth = if (tvW > 0) tvW else 400,
-                        touchAreaHeight = if (tvH > 0) tvH else 700,
-                        onInjectTouch = { action, pointerId, x, y, pressure, actionButton, buttons ->
-                            val sw = screenWidth.takeIf { it > 0 } ?: 1920
-                            val sh = screenHeight.takeIf { it > 0 } ?: 1080
-                            session.sendTouchEvent(action, pointerId, x, y, sw, sh, pressure, actionButton, buttons)
-                        },
-                        onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
-                    )
-                    // Update with actual TextureView dimensions once available
-                    if (tvW > 0 && tvH > 0) {
-                        touchEventHandler?.updateDimensions(tvW, tvH)
-                    }
-                }
 
                 decodeVideo(session)
             } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); stopSelf() }
@@ -389,7 +377,7 @@ class ScrcpyFloatingService : Service() {
     private fun stopScrcpy() {
         isRunning = false
         releaseDecoder()
-        scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
+        scrcpySession?.stop(); scrcpySession = null
     }
 
     override fun onDestroy() {
