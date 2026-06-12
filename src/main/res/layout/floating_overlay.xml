@@ -10,13 +10,13 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Drag bar on top -->
     <FrameLayout
         android:id="@+id/floating_drag_bar"
         android:layout_width="match_parent"
         android:layout_height="28dp"
         android:layout_gravity="top"
         android:padding="4dp">
-
         <View
             android:layout_width="60dp"
             android:layout_height="4dp"
@@ -24,35 +24,41 @@
             android:background="#66FFFFFF" />
     </FrameLayout>
 
-    <!-- Four corner resize handles -->
+    <!-- Top-left corner handle -->
     <View
         android:id="@+id/resize_tl"
         android:layout_width="32dp"
         android:layout_height="32dp"
         android:layout_gravity="start|top"
-        android:background="#33FFFFFF" />
+        android:background="#44FFFFFF" />
 
+    <!-- Top-right corner handle -->
     <View
         android:id="@+id/resize_tr"
         android:layout_width="32dp"
         android:layout_height="32dp"
         android:layout_gravity="end|top"
-        android:background="#33FFFFFF" />
+        android:background="#44FFFFFF" />
 
+    <!-- Bottom-left corner handle -->
     <View
         android:id="@+id/resize_bl"
         android:layout_width="32dp"
         android:layout_height="32dp"
         android:layout_gravity="start|bottom"
-        android:background="#33FFFFFF" />
+        android:layout_marginBottom="32dp"
+        android:background="#44FFFFFF" />
 
+    <!-- Bottom-right corner handle -->
     <View
         android:id="@+id/resize_br"
         android:layout_width="32dp"
         android:layout_height="32dp"
         android:layout_gravity="end|bottom"
-        android:background="#33FFFFFF" />
+        android:layout_marginBottom="32dp"
+        android:background="#44FFFFFF" />
 
+    <!-- Control bar at bottom -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="32dp"

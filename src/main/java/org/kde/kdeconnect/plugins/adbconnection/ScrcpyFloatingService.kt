@@ -283,34 +283,34 @@ class ScrcpyFloatingService : Service() {
     private fun setupResizeHandles() {
         val minSize = 200
 
-        // Bottom-right: increase width/height (original behavior)
+        // Bottom-right: width/height grow
         setupCornerResize(R.id.resize_br, minSize) { dx, dy ->
             layoutParams.width = (layoutParams.width + dx).coerceAtLeast(minSize)
             layoutParams.height = (layoutParams.height + dy).coerceAtLeast(minSize)
         }
 
-        // Bottom-left: increase width (from left), increase height
+        // Bottom-left: x moves left, width grows right
         setupCornerResize(R.id.resize_bl, minSize) { dx, dy ->
             val newW = (layoutParams.width - dx).coerceAtLeast(minSize)
-            layoutParams.x += (layoutParams.width - newW)
+            layoutParams.x = layoutParams.x + (layoutParams.width - newW)
             layoutParams.width = newW
             layoutParams.height = (layoutParams.height + dy).coerceAtLeast(minSize)
         }
 
-        // Top-right: increase width, increase height (from top)
+        // Top-right: width grows, y moves up
         setupCornerResize(R.id.resize_tr, minSize) { dx, dy ->
             layoutParams.width = (layoutParams.width + dx).coerceAtLeast(minSize)
             val newH = (layoutParams.height - dy).coerceAtLeast(minSize)
-            layoutParams.y += (layoutParams.height - newH)
+            layoutParams.y = layoutParams.y + (layoutParams.height - newH)
             layoutParams.height = newH
         }
 
-        // Top-left: increase width/height from top-left
+        // Top-left: x moves left, y moves up
         setupCornerResize(R.id.resize_tl, minSize) { dx, dy ->
             val newW = (layoutParams.width - dx).coerceAtLeast(minSize)
             val newH = (layoutParams.height - dy).coerceAtLeast(minSize)
-            layoutParams.x += (layoutParams.width - newW)
-            layoutParams.y += (layoutParams.height - newH)
+            layoutParams.x = layoutParams.x + (layoutParams.width - newW)
+            layoutParams.y = layoutParams.y + (layoutParams.height - newH)
             layoutParams.width = newW
             layoutParams.height = newH
         }
@@ -333,7 +333,9 @@ class ScrcpyFloatingService : Service() {
                     lastX = event.rawX.toInt()
                     lastY = event.rawY.toInt()
                     onResize(dx, dy)
-                    try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    mainHandler.post {
+                        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    }
                     true
                 }
                 else -> false
