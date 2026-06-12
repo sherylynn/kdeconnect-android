@@ -10,6 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Drag bar on top -->
     <FrameLayout
         android:id="@+id/floating_drag_bar"
         android:layout_width="match_parent"
@@ -23,6 +24,7 @@
             android:background="#66FFFFFF" />
     </FrameLayout>
 
+    <!-- Top-left corner handle -->
     <View
         android:id="@+id/resize_tl"
         android:layout_width="32dp"
@@ -30,6 +32,7 @@
         android:layout_gravity="start|top"
         android:background="#44FFFFFF" />
 
+    <!-- Top-right corner handle -->
     <View
         android:id="@+id/resize_tr"
         android:layout_width="32dp"
@@ -37,20 +40,33 @@
         android:layout_gravity="end|top"
         android:background="#44FFFFFF" />
 
-    <!-- Bottom bar: handles on sides, buttons in center, shrunk -->
+    <!-- Bottom-left corner handle -->
+    <View
+        android:id="@+id/resize_bl"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="start|bottom"
+        android:layout_marginBottom="32dp"
+        android:background="#44FFFFFF" />
+
+    <!-- Bottom-right corner handle -->
+    <View
+        android:id="@+id/resize_br"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="end|bottom"
+        android:layout_marginBottom="32dp"
+        android:background="#44FFFFFF" />
+
+    <!-- Control bar at bottom -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="28dp"
+        android:layout_height="32dp"
         android:layout_gravity="bottom"
         android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="#CC1A1A1E">
-
-        <View
-            android:id="@+id/resize_bl"
-            android:layout_width="16dp"
-            android:layout_height="match_parent"
-            android:background="#44FFFFFF" />
+        android:gravity="center"
+        android:background="#CC1A1A1E"
+        android:paddingHorizontal="4dp">
 
         <ImageView
             android:id="@+id/floating_btn_back"
@@ -58,7 +74,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:focusable="false"
-            android:padding="2dp"
+            android:padding="4dp"
             android:src="@drawable/caret_left"
             android:tint="#DEDEDE" />
 
@@ -68,7 +84,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:focusable="false"
-            android:padding="2dp"
+            android:padding="4dp"
             android:src="@drawable/o"
             android:tint="#DEDEDE" />
 
@@ -78,7 +94,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:focusable="false"
-            android:padding="2dp"
+            android:padding="4dp"
             android:src="@drawable/square"
             android:tint="#DEDEDE" />
 
@@ -88,7 +104,7 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:focusable="false"
-            android:padding="2dp"
+            android:padding="4dp"
             android:src="@drawable/compress"
             android:tint="#DEDEDE" />
 
@@ -98,15 +114,9 @@
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:focusable="false"
-            android:padding="2dp"
+            android:padding="4dp"
             android:src="@drawable/x_icon"
             android:tint="#ca5357" />
-
-        <View
-            android:id="@+id/resize_br"
-            android:layout_width="16dp"
-            android:layout_height="match_parent"
-            android:background="#44FFFFFF" />
     </LinearLayout>
 
 </FrameLayout>
