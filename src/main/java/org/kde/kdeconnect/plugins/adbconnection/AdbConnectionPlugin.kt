@@ -31,6 +31,13 @@ class AdbConnectionPlugin : Plugin() {
 
     override fun onCreate(): Boolean {
         Log.i(LOG_TAG, "AdbConnectionPlugin created, device host: ${if (isDeviceInitialized) device.getHostAddress() else "null"}")
+        
+        // Auto connect if enabled
+        if (isDeviceInitialized && preferences?.getBoolean("auto_connect", false) == true) {
+            Log.i(LOG_TAG, "Auto connect enabled, connecting to ADB...")
+            connectToDevice()
+        }
+        
         return true
     }
 

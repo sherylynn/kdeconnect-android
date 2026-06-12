@@ -25,3 +25,7 @@ UI太丑了，直接照搬 /root/Easycontrol_For_Car 的吧，现在的icon也�
 我需要在插件设置页直接可以看到我设置了什么而不是点进去子项才能看见我设置了什么，并且尽量可以直接修改
 
 video codec 是正确显示了我选择的 h.264 但 max size 和 max fps video bit rate 都只显示 %s 而不是我选择的数值
+
+两个选项lock on disconect 和 auto connect 即使勾选了都不生效
+
+锁屏对应的事件应该是错了，连快捷键中的锁屏，都对应成了长按开机键了
