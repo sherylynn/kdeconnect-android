@@ -140,15 +140,13 @@ class ScrcpyFloatingService : Service() {
             initW, initH,
             type,
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.START
-            x = (screenW - initW) / 2
-            y = (screenH - initH) / 2
+            gravity = Gravity.CENTER
+            x = 0
+            y = 0
         }
 
         setupTextureView()
