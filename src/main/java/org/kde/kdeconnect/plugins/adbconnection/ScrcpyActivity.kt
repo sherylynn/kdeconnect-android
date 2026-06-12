@@ -346,7 +346,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
 
         override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
             try {
-                codec.releaseOutputBuffer(index, info.presentationTimeUs)
+                codec.releaseOutputBuffer(index, true)
             } catch (e: Exception) { Log.e(TAG, "Release output buffer error", e) }
         }
 
@@ -457,16 +457,16 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         while (isRunning) {
             val packet = session.readVideoPacket() ?: break
             val now = System.currentTimeMillis()
+            val gapMs = now - lastPacketTime
 
             if (packet.isSession) {
                 if (packet.width > 0 && packet.height > 0) {
                     val newW = packet.width
                     val newH = packet.height
                     val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
-                    val wasGapped = now - lastPacketTime > 300
                     screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured || wasGapped) {
-                        Log.i(TAG, "Recreating decoder: ${newW}x${newH} sizeChanged=$sizeChanged gapped=$wasGapped")
+                    if (sizeChanged || !decoderConfigured) {
+                        Log.i(TAG, "Session packet: recreating decoder ${newW}x${newH}")
                         createDecoder(newW, newH)
                         waitingForKeyFrame = true
                     }
@@ -480,9 +480,10 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 continue
             }
 
-            // Detect stream gap (screen lock/unlock)
-            if (decoderConfigured && (now - lastPacketTime > 300)) {
-                Log.i(TAG, "Stream gap ${(now - lastPacketTime)}ms, will recreate decoder on next session")
+            // Detect stream gap (screen lock/unlock) — aggressively recreate decoder
+            if (gapMs > 200 && decoderConfigured) {
+                Log.i(TAG, "Stream gap ${gapMs}ms, recreating decoder immediately")
+                createDecoder(screenWidth, screenHeight)
                 waitingForKeyFrame = true
             }
             lastPacketTime = now

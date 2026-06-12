@@ -68,7 +68,7 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
             inputBufferQueue.offer(index)
         }
         override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
-            try { codec.releaseOutputBuffer(index, info.presentationTimeUs) } catch (_: Exception) {}
+            try { codec.releaseOutputBuffer(index, true) } catch (_: Exception) {}
         }
         override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
             Log.e(TAG, "Decoder error", e)
