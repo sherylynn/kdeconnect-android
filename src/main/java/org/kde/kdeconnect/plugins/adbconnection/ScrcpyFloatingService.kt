@@ -280,25 +280,31 @@ class ScrcpyFloatingService : Service() {
     private fun setupResizeHandle() {
         val resize = overlayView?.findViewById<View>(R.id.floating_resize) ?: return
         val minSize = 150
-        var lastRawX = 0; var lastRawY = 0
 
         resize.setOnTouchListener { _, event ->
             when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    lastRawX = event.rawX.toInt()
-                    lastRawY = event.rawY.toInt()
-                    true
-                }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX.toInt() - lastRawX
-                    val dy = event.rawY.toInt() - lastRawY
-                    lastRawX = event.rawX.toInt()
-                    lastRawY = event.rawY.toInt()
-                    val newW = (layoutParams.width + dx).coerceAtLeast(minSize)
-                    val newH = (layoutParams.height + dy).coerceAtLeast(minSize)
-                    layoutParams.width = newW
-                    layoutParams.height = newH
-                    try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    // Calculate new size = touch position to overlay top-left (like EasyControl)
+                    val newX = event.rawX.toInt() - layoutParams.x
+                    val newY = event.rawY.toInt() - layoutParams.y
+                    if (newX < minSize || newY < minSize) return@setOnTouchListener true
+
+                    // Calculate TextureView size maintaining video aspect ratio
+                    if (screenWidth > 0 && screenHeight > 0) {
+                        val videoRatio = screenWidth.toFloat() / screenHeight.toFloat()
+                        val w: Int
+                        val h: Int
+                        if (newX.toFloat() / newY > videoRatio) {
+                            h = newY
+                            w = (h * videoRatio).toInt()
+                        } else {
+                            w = newX
+                            h = (w / videoRatio).toInt()
+                        }
+                        layoutParams.width = w
+                        layoutParams.height = h
+                        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    }
                     true
                 }
                 else -> false
