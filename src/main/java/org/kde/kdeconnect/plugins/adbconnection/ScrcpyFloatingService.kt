@@ -12,6 +12,7 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
@@ -48,7 +49,9 @@ class ScrcpyFloatingService : Service() {
     private var decoderConfigured = false
     private val codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
     private val inputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
-    private val handler = Handler(Looper.getMainLooper())
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var codecHandler: Handler? = null
+    private var codecHandlerThread: HandlerThread? = null
     private var touchEventHandler: TouchEventHandler? = null
     private var surfaceReady = false
 
@@ -76,7 +79,7 @@ class ScrcpyFloatingService : Service() {
             else format.getInteger(MediaFormat.KEY_HEIGHT)
             if (w > 0 && h > 0) {
                 screenWidth = w; screenHeight = h
-                handler.post { updateOverlaySize() }
+                mainHandler.post { updateOverlaySize() }
             }
         }
     }
@@ -138,13 +141,14 @@ class ScrcpyFloatingService : Service() {
             type,
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             x = (screenW - initW) / 2
-            y = 100
+            y = (screenH - initH) / 2
         }
 
         setupTextureView()
@@ -273,11 +277,11 @@ class ScrcpyFloatingService : Service() {
                 scrcpySession = session
                 screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0
                 screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
-                handler.post { updateOverlaySize() }
+                mainHandler.post { updateOverlaySize() }
 
                 val tv = textureView ?: return@Thread
                 // Create touch handler with session dimensions, update view dimensions later
-                handler.post {
+                mainHandler.post {
                     val tvW = tv.width
                     val tvH = tv.height
                     touchEventHandler = TouchEventHandler(
@@ -317,7 +321,7 @@ class ScrcpyFloatingService : Service() {
                     val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
                     screenWidth = newW; screenHeight = newH
                     if (sizeChanged || !decoderConfigured) {
-                        handler.post { updateOverlaySize() }
+                        mainHandler.post { updateOverlaySize() }
                         createDecoder(newW, newH)
                     } else if (gapMs > 1500 && decoderConfigured) {
                         try { decoder?.flush() } catch (_: Exception) {}
@@ -344,9 +348,13 @@ class ScrcpyFloatingService : Service() {
         releaseDecoder()
         val s = surface ?: return
         try {
+            // Create dedicated HandlerThread for decoder callbacks (like EasyControl)
+            codecHandlerThread = HandlerThread("floating_decoder").also { it.start() }
+            codecHandler = Handler(codecHandlerThread!!.looper)
+
             val fmt = MediaFormat.createVideoFormat(codecMime, width, height)
             decoder = MediaCodec.createDecoderByType(codecMime)
-            decoder!!.setCallback(decoderCallback, handler)
+            decoder!!.setCallback(decoderCallback, codecHandler)
             decoder!!.configure(fmt, s, null, 0)
             decoder!!.start()
             decoderConfigured = true
@@ -357,6 +365,9 @@ class ScrcpyFloatingService : Service() {
         inputBufferQueue.clear()
         try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
         decoder = null; decoderConfigured = false
+        codecHandlerThread?.quitSafely()
+        codecHandlerThread = null
+        codecHandler = null
     }
 
     private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {
@@ -386,6 +397,7 @@ class ScrcpyFloatingService : Service() {
     override fun onDestroy() {
         stopScrcpy()
         hideOverlay()
+        codecHandlerThread?.quitSafely()
         super.onDestroy()
     }
 }
