@@ -24,10 +24,32 @@
             android:background="#66FFFFFF" />
     </FrameLayout>
 
+    <!-- Four corner resize handles -->
     <View
-        android:id="@+id/floating_resize"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
+        android:id="@+id/resize_tl"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="start|top"
+        android:background="#33FFFFFF" />
+
+    <View
+        android:id="@+id/resize_tr"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="end|top"
+        android:background="#33FFFFFF" />
+
+    <View
+        android:id="@+id/resize_bl"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_gravity="start|bottom"
+        android:background="#33FFFFFF" />
+
+    <View
+        android:id="@+id/resize_br"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
         android:layout_gravity="end|bottom"
         android:background="#33FFFFFF" />
 

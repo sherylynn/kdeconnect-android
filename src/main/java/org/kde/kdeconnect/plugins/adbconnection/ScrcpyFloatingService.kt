@@ -150,7 +150,7 @@ class ScrcpyFloatingService : Service() {
 
         setupTextureView()
         setupDragBar()
-        setupResizeHandle()
+        setupResizeHandles()
         setupControlBar()
 
         windowManager!!.addView(overlayView, layoutParams)
@@ -280,28 +280,59 @@ class ScrcpyFloatingService : Service() {
     }
 
     @SuppressLint("ClickableViewAccessibility")
-    private fun setupResizeHandle() {
-        val resize = overlayView?.findViewById<View>(R.id.floating_resize) ?: return
+    private fun setupResizeHandles() {
         val minSize = 200
-        var startX = 0; var startY = 0
-        var startW = 0; var startH = 0
 
-        resize.setOnTouchListener { _, event ->
+        // Bottom-right: increase width/height (original behavior)
+        setupCornerResize(R.id.resize_br, minSize) { dx, dy ->
+            layoutParams.width = (layoutParams.width + dx).coerceAtLeast(minSize)
+            layoutParams.height = (layoutParams.height + dy).coerceAtLeast(minSize)
+        }
+
+        // Bottom-left: increase width (from left), increase height
+        setupCornerResize(R.id.resize_bl, minSize) { dx, dy ->
+            val newW = (layoutParams.width - dx).coerceAtLeast(minSize)
+            layoutParams.x += (layoutParams.width - newW)
+            layoutParams.width = newW
+            layoutParams.height = (layoutParams.height + dy).coerceAtLeast(minSize)
+        }
+
+        // Top-right: increase width, increase height (from top)
+        setupCornerResize(R.id.resize_tr, minSize) { dx, dy ->
+            layoutParams.width = (layoutParams.width + dx).coerceAtLeast(minSize)
+            val newH = (layoutParams.height - dy).coerceAtLeast(minSize)
+            layoutParams.y += (layoutParams.height - newH)
+            layoutParams.height = newH
+        }
+
+        // Top-left: increase width/height from top-left
+        setupCornerResize(R.id.resize_tl, minSize) { dx, dy ->
+            val newW = (layoutParams.width - dx).coerceAtLeast(minSize)
+            val newH = (layoutParams.height - dy).coerceAtLeast(minSize)
+            layoutParams.x += (layoutParams.width - newW)
+            layoutParams.y += (layoutParams.height - newH)
+            layoutParams.width = newW
+            layoutParams.height = newH
+        }
+    }
+
+    private fun setupCornerResize(viewId: Int, minSize: Int, onResize: (Int, Int) -> Unit) {
+        val view = overlayView?.findViewById<View>(viewId) ?: return
+        var lastX = 0; var lastY = 0
+
+        view.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    startX = event.rawX.toInt()
-                    startY = event.rawY.toInt()
-                    startW = layoutParams.width
-                    startH = layoutParams.height
+                    lastX = event.rawX.toInt()
+                    lastY = event.rawY.toInt()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX.toInt() - startX
-                    val dy = event.rawY.toInt() - startY
-                    val newW = (startW + dx).coerceAtLeast(minSize)
-                    val newH = (startH + dy).coerceAtLeast(minSize)
-                    layoutParams.width = newW
-                    layoutParams.height = newH
+                    val dx = event.rawX.toInt() - lastX
+                    val dy = event.rawY.toInt() - lastY
+                    lastX = event.rawX.toInt()
+                    lastY = event.rawY.toInt()
+                    onResize(dx, dy)
                     try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
                     true
                 }
