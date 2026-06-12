@@ -9,3 +9,7 @@
 或者看看这个项目的ui能有什么参考移植的地方吗 /root/Easycontrol_For_Car 研究研究
 
 另外scrcpyforandroid操控还更流畅，可以设置更多细节，请继续研究移植，尽量一比一移植，jetpackcompose能直接移植吗，
+
+
+
+UI太丑了，直接照搬 /root/Easycontrol_For_Car 的吧，现在的icon也不对，直接一比一照搬吧

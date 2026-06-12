@@ -6,6 +6,8 @@ import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.Rational
 import android.view.KeyEvent
@@ -14,7 +16,9 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.View
 import android.widget.Button
+import android.widget.GridLayout
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
@@ -31,6 +35,9 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private lateinit var surfaceView: ScrcpyInputSurfaceView
     private lateinit var floatingButton: ImageButton
     private lateinit var floatingMenu: ScrollView
+    private lateinit var navBar: LinearLayout
+    private lateinit var barView: GridLayout
+    private lateinit var buttonMore: ImageView
 
     private var decoder: MediaCodec? = null
     private var scrcpySession: ScrcpySession? = null
@@ -47,6 +54,9 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private var touchEventHandler: TouchEventHandler? = null
     private val gotOutputFormat = AtomicBoolean(false)
     private var isInPipMode = false
+    private var isNavBarVisible = true
+    private var moreMenuHandler = Handler(Looper.getMainLooper())
+    private var moreMenuRunnable: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -131,6 +141,19 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             floatingMenu.visibility = View.GONE
         }
 
+        // Setup new UI elements
+        navBar = findViewById(R.id.nav_bar)
+        barView = findViewById(R.id.bar_view)
+        buttonMore = findViewById(R.id.button_more)
+
+        setupBottomNavBar()
+        setupBarView()
+        setupMoreButton()
+
+        // Show nav bar by default
+        navBar.visibility = View.VISIBLE
+        isNavBarVisible = true
+
         // Hide system bars for fullscreen
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_FULLSCREEN or
@@ -167,9 +190,17 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         if (isTouchOnView(floatingButton, event) || isTouchOnView(floatingMenu, event)) {
             return super.dispatchTouchEvent(event)
         }
+        // Check if touch is on new UI elements - let them handle it normally
+        if (isTouchOnView(navBar, event) || isTouchOnView(buttonMore, event) || isTouchOnView(barView, event)) {
+            return super.dispatchTouchEvent(event)
+        }
         // Hide floating menu when touching elsewhere
         if (floatingMenu.visibility == View.VISIBLE) {
             floatingMenu.visibility = View.GONE
+        }
+        // Hide bar view when touching elsewhere
+        if (barView.visibility == View.VISIBLE) {
+            hideBarView()
         }
         // Send to scrcpy session
         val handler = touchEventHandler
@@ -189,6 +220,112 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         return x >= location[0] && x <= location[0] + view.width &&
                y >= location[1] && y <= location[1] + view.height
     }
+
+    // ============ New UI Setup Methods ============
+
+    private fun setupBottomNavBar() {
+        // Rotate button
+        findViewById<ImageView>(R.id.button_rotate).setOnClickListener {
+            scrcpySession?.rotateDevice()
+            resetBarViewTimer()
+        }
+        // App switch button
+        findViewById<ImageView>(R.id.button_switch).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
+            resetBarViewTimer()
+        }
+        // Home button
+        findViewById<ImageView>(R.id.button_home).setOnClickListener {
+            scrcpySession?.sendHome()
+            resetBarViewTimer()
+        }
+        // Back button
+        findViewById<ImageView>(R.id.button_back).setOnClickListener {
+            scrcpySession?.sendBack()
+            resetBarViewTimer()
+        }
+    }
+
+    private fun setupBarView() {
+        // Nav toggle
+        findViewById<ImageView>(R.id.button_nav_bar).setOnClickListener {
+            isNavBarVisible = !isNavBarVisible
+            navBar.visibility = if (isNavBarVisible) View.VISIBLE else View.GONE
+            resetBarViewTimer()
+        }
+        // Minimize
+        findViewById<ImageView>(R.id.button_mini).setOnClickListener {
+            moveTaskToBack(true)
+            resetBarViewTimer()
+        }
+        // PiP (full_exit)
+        findViewById<ImageView>(R.id.button_full_exit).setOnClickListener {
+            if (!isInPipMode) enterPipMode()
+            hideBarView()
+        }
+        // Close
+        findViewById<ImageView>(R.id.button_close).setOnClickListener {
+            stopScrcpy()
+            finish()
+        }
+        // Transfer (notification panel)
+        findViewById<ImageView>(R.id.button_transfer).setOnClickListener {
+            scrcpySession?.expandNotificationPanel()
+            resetBarViewTimer()
+        }
+        // Light off (turn off screen)
+        findViewById<ImageView>(R.id.button_light_off).setOnClickListener {
+            scrcpySession?.setDisplayPower(false)
+            resetBarViewTimer()
+        }
+        // Power
+        findViewById<ImageView>(R.id.button_power).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+            resetBarViewTimer()
+        }
+        // Lock
+        findViewById<ImageView>(R.id.button_lock).setOnClickListener {
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+            resetBarViewTimer()
+        }
+    }
+
+    private fun setupMoreButton() {
+        buttonMore.setOnClickListener {
+            if (barView.visibility == View.VISIBLE) {
+                hideBarView()
+            } else {
+                showBarView()
+            }
+        }
+    }
+
+    private fun showBarView() {
+        barView.visibility = View.VISIBLE
+        buttonMore.setImageResource(R.drawable.x_icon)
+        startBarViewTimer()
+    }
+
+    private fun hideBarView() {
+        barView.visibility = View.GONE
+        buttonMore.setImageResource(R.drawable.ellipsis_vertical)
+        moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
+    }
+
+    private fun resetBarViewTimer() {
+        startBarViewTimer()
+    }
+
+    private fun startBarViewTimer() {
+        moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
+        moreMenuRunnable = Runnable { hideBarView() }
+        moreMenuHandler.postDelayed(moreMenuRunnable!!, 3000)
+    }
+
+    // ============ Decoder Methods ============
 
     private fun createDecoder(width: Int, height: Int) {
         releaseDecoder()
@@ -333,6 +470,9 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 isInPipMode = true
                 floatingButton.visibility = View.GONE
                 floatingMenu.visibility = View.GONE
+                navBar.visibility = View.GONE
+                barView.visibility = View.GONE
+                buttonMore.visibility = View.GONE
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to enter PiP mode", e)
             }
@@ -345,6 +485,9 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         if (isInPictureInPictureMode) {
             floatingButton.visibility = View.GONE
             floatingMenu.visibility = View.GONE
+            navBar.visibility = View.GONE
+            barView.visibility = View.GONE
+            buttonMore.visibility = View.GONE
             window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -352,10 +495,16 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             )
         } else {
             floatingButton.visibility = View.VISIBLE
+            navBar.visibility = if (isNavBarVisible) View.VISIBLE else View.GONE
+            buttonMore.visibility = View.VISIBLE
         }
     }
 
-    override fun onDestroy() { super.onDestroy(); stopScrcpy() }
+    override fun onDestroy() {
+        moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
+        super.onDestroy()
+        stopScrcpy()
+    }
 
     companion object {
         private const val TAG = "ScrcpyActivity"

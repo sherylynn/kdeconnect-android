@@ -717,5 +717,10 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="scrcpy_file_manager">File Manager</string>
     <string name="scrcpy_record">Record</string>
     <string name="scrcpy_stop_record">Stop Record</string>
+    <string name="scrcpy_more">More</string>
+    <string name="scrcpy_toggle_nav">Toggle Nav</string>
+    <string name="scrcpy_minimize">Minimize</string>
+    <string name="scrcpy_pip">PiP</string>
+    <string name="scrcpy_close">Close</string>
 
 </resources>
