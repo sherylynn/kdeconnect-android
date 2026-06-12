@@ -446,21 +446,38 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
 
     private fun decodeVideo(session: ScrcpySession) {
         isRunning = true
+        var lastPacketTime = System.currentTimeMillis()
         while (isRunning) {
             val packet = session.readVideoPacket() ?: break
+            val now = System.currentTimeMillis()
+
             if (packet.isSession) {
                 if (packet.width > 0 && packet.height > 0) {
-                    screenWidth = packet.width; screenHeight = packet.height
-                    if (decoderConfigured && (packet.width != screenWidth || packet.height != screenHeight)) { gotOutputFormat.set(false); createDecoder(packet.width, packet.height) }
-                    else if (!decoderConfigured) { createDecoder(packet.width, packet.height) }
+                    val newW = packet.width
+                    val newH = packet.height
+                    val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
+                    screenWidth = newW; screenHeight = newH
+                    if (sizeChanged || !decoderConfigured) {
+                        createDecoder(newW, newH)
+                    } else if (decoderConfigured) {
+                        try { decoder?.flush() } catch (_: Exception) {}
+                    }
                     runOnUiThread {
                         surfaceView.setVideoDimensions(screenWidth, screenHeight)
                         requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                         touchEventHandler?.updateSessionDimensions(screenWidth, screenHeight)
                     }
                 }
+                lastPacketTime = now
                 continue
             }
+
+            // Detect stream gap (screen lock/unlock) — flush decoder for fresh start
+            if (decoderConfigured && (now - lastPacketTime > 500)) {
+                Log.i(TAG, "Stream gap ${(now - lastPacketTime)}ms, flushing decoder")
+                try { decoder?.flush() } catch (_: Exception) {}
+            }
+            lastPacketTime = now
             if (packet.data.isEmpty()) continue
             if (!decoderConfigured) { if (screenWidth <= 0 || screenHeight <= 0) continue; createDecoder(screenWidth, screenHeight) }
             feedPacket(packet.data, packet.ptsUs, packet.isConfig, packet.isKeyFrame)
