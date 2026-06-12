@@ -286,40 +286,30 @@ class ScrcpyFloatingService : Service() {
     private fun decodeVideo(session: ScrcpySession) {
         isRunning = true
         var lastPacketTime = System.currentTimeMillis()
-        var waitingForKeyFrame = false
         while (isRunning) {
             val packet = session.readVideoPacket() ?: break
             val now = System.currentTimeMillis()
-            val gapMs = now - lastPacketTime
 
             if (packet.isSession) {
                 if (packet.width > 0 && packet.height > 0) {
                     val newW = packet.width; val newH = packet.height
                     val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
+                    val wasGapped = now - lastPacketTime > 2000
                     screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured) {
+                    if (sizeChanged || !decoderConfigured || wasGapped) {
                         handler.post { updateOverlaySize() }
                         createDecoder(newW, newH)
-                        waitingForKeyFrame = true
                     }
                 }
                 lastPacketTime = now; continue
             }
 
-            if (gapMs > 200 && decoderConfigured) {
-                createDecoder(screenWidth, screenHeight)
-                waitingForKeyFrame = true
-            }
             lastPacketTime = now
-
             if (packet.data.isEmpty()) continue
             if (!decoderConfigured) {
                 if (screenWidth <= 0 || screenHeight <= 0) continue
                 createDecoder(screenWidth, screenHeight)
-                waitingForKeyFrame = true
             }
-            if (waitingForKeyFrame && !packet.isKeyFrame && !packet.isConfig) continue
-            if (packet.isKeyFrame) waitingForKeyFrame = false
             feedPacket(packet.data, packet.ptsUs, packet.isConfig, packet.isKeyFrame)
         }
     }
