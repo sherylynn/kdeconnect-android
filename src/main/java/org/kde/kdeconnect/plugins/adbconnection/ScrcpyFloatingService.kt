@@ -1,31 +1,33 @@
 package org.kde.kdeconnect.plugins.adbconnection
 
 import android.annotation.SuppressLint
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
+import android.graphics.SurfaceTexture
 import android.media.MediaCodec
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.DisplayMetrics
 import android.util.Log
 import android.view.*
-import android.widget.EditText
-import android.widget.GridLayout
 import android.widget.ImageView
-import android.widget.LinearLayout
 import org.kde.kdeconnect_tp.R
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.TouchEventHandler
-import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.TimeUnit
 
 class ScrcpyFloatingService : Service() {
 
     companion object {
         private const val TAG = "ScrcpyFloatingSvc"
+        private const val CHANNEL_ID = "scrcpy_floating"
+        private const val NOTIFICATION_ID = 3001
         const val ACTION_START = "org.kde.kdeconnect.floating.START"
         const val ACTION_STOP = "org.kde.kdeconnect.floating.STOP"
         const val EXTRA_HOST = "host"
@@ -36,20 +38,21 @@ class ScrcpyFloatingService : Service() {
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
     private var textureView: TextureView? = null
+    private var surfaceTexture: SurfaceTexture? = null
+    private var surface: Surface? = null
     private var scrcpySession: ScrcpySession? = null
     private var decoder: MediaCodec? = null
-    private var surface: Surface? = null
     private var isRunning = false
     private var screenWidth = 0
     private var screenHeight = 0
     private var decoderConfigured = false
     private val codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
-    private val inputBufferQueue = LinkedBlockingQueue<Int>()
+    private val inputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
     private val handler = Handler(Looper.getMainLooper())
     private var touchEventHandler: TouchEventHandler? = null
+    private var surfaceReady = false
 
     private lateinit var layoutParams: WindowManager.LayoutParams
-
     private var host = ""
     private var port = 0
     private var prefsName = ""
@@ -87,8 +90,8 @@ class ScrcpyFloatingService : Service() {
                 port = intent.getIntExtra(EXTRA_PORT, 0)
                 prefsName = intent.getStringExtra(EXTRA_PREFS_NAME) ?: ""
                 if (host.isEmpty() || port == 0) { stopSelf(); return START_NOT_STICKY }
+                startForeground(NOTIFICATION_ID, buildNotification())
                 showOverlay()
-                startScrcpy()
             }
             ACTION_STOP -> {
                 stopScrcpy()
@@ -99,20 +102,39 @@ class ScrcpyFloatingService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun buildNotification(): Notification {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(CHANNEL_ID, "悬浮窗投屏", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java)?.createNotificationChannel(channel)
+        }
+        return Notification.Builder(this, CHANNEL_ID)
+            .setContentTitle("悬浮窗投屏")
+            .setContentText("正在运行")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setOngoing(true)
+            .build()
+    }
+
     @SuppressLint("InflateParams")
     private fun showOverlay() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-
-        val inflater = LayoutInflater.from(this)
-        overlayView = inflater.inflate(R.layout.floating_overlay, null)
+        overlayView = LayoutInflater.from(this).inflate(R.layout.floating_overlay, null)
         textureView = overlayView!!.findViewById(R.id.floating_texture)
 
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
+        // Calculate initial size based on screen (like EasyControl: shortEdge * 4/5)
+        val dm = resources.displayMetrics
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
+        val shortEdge = minOf(screenW, screenH)
+        val initW = shortEdge * 4 / 5
+        val initH = (initW * 16f / 9f).toInt()
+
         layoutParams = WindowManager.LayoutParams(
-            400, 700,
+            initW, initH,
             type,
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
@@ -121,27 +143,56 @@ class ScrcpyFloatingService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 50
-            y = 200
+            x = (screenW - initW) / 2
+            y = 100
         }
 
+        setupTextureView()
         setupDragBar()
         setupControlBar()
-        setupTouchForwarding()
 
         windowManager!!.addView(overlayView, layoutParams)
     }
 
     private fun hideOverlay() {
-        try {
-            if (overlayView != null) windowManager?.removeView(overlayView)
-        } catch (_: Exception) {}
-        overlayView = null
+        try { if (overlayView != null) windowManager?.removeView(overlayView) } catch (_: Exception) {}
+        overlayView = null; textureView = null
+    }
+
+    private fun setupTextureView() {
+        val tv = textureView ?: return
+        tv.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                surfaceTexture = st
+                surface = Surface(st)
+                surfaceReady = true
+                startScrcpy()
+            }
+            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                touchEventHandler?.updateDimensions(w, h)
+            }
+            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                // KEY: return false to prevent SurfaceTexture release (like EasyControl)
+                return false
+            }
+            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+        }
+
+        // Forward touch events to remote device
+        tv.setOnTouchListener { _, event ->
+            val handler = touchEventHandler ?: return@setOnTouchListener false
+            if (!isRunning) return@setOnTouchListener false
+            val w = tv.width; val h = tv.height
+            if (w <= 0 || h <= 0) return@setOnTouchListener false
+            handler.updateDimensions(w, h)
+            handler.handleMotionEvent(event)
+            true
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupDragBar() {
-        val bar = overlayView!!.findViewById<View>(R.id.floating_drag_bar) ?: return
+        val bar = overlayView?.findViewById<View>(R.id.floating_drag_bar) ?: return
         var lastX = 0; var lastY = 0
         var initialX = 0; var initialY = 0
         var isDragging = false
@@ -149,12 +200,9 @@ class ScrcpyFloatingService : Service() {
         bar.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialX = layoutParams.x
-                    initialY = layoutParams.y
-                    lastX = event.rawX.toInt()
-                    lastY = event.rawY.toInt()
-                    isDragging = false
-                    true
+                    initialX = layoutParams.x; initialY = layoutParams.y
+                    lastX = event.rawX.toInt(); lastY = event.rawY.toInt()
+                    isDragging = false; true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX.toInt() - lastX
@@ -173,64 +221,34 @@ class ScrcpyFloatingService : Service() {
         }
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupTouchForwarding() {
-        val tv = textureView ?: return
-        val surfaceSize = intArrayOf(0, 0)
-
-        tv.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-            override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
-                surface = Surface(st)
-                surfaceSize[0] = w; surfaceSize[1] = h
-                startScrcpy()
-            }
-            override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
-                surfaceSize[0] = w; surfaceSize[1] = h
-                touchEventHandler?.updateDimensions(w, h)
-            }
-            override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean { return false }
-            override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
-        }
-
-        tv.setOnTouchListener { _, event ->
-            val handler = touchEventHandler ?: return@setOnTouchListener false
-            if (!isRunning || surfaceSize[0] <= 0 || surfaceSize[1] <= 0) return@setOnTouchListener false
-            handler.updateDimensions(surfaceSize[0], surfaceSize[1])
-            handler.handleMotionEvent(event)
-            true
-        }
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
     private fun setupControlBar() {
-        val session = { scrcpySession }
-
-        overlayView!!.findViewById<ImageView>(R.id.floating_btn_back)?.setOnClickListener {
-            session()?.sendBack()
+        overlayView?.findViewById<ImageView>(R.id.floating_btn_back)?.setOnClickListener {
+            scrcpySession?.sendBack()
         }
-        overlayView!!.findViewById<ImageView>(R.id.floating_btn_home)?.setOnClickListener {
-            session()?.sendHome()
+        overlayView?.findViewById<ImageView>(R.id.floating_btn_home)?.setOnClickListener {
+            scrcpySession?.sendHome()
         }
-        overlayView!!.findViewById<ImageView>(R.id.floating_btn_switch)?.setOnClickListener {
-            session()?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
-            session()?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
+        overlayView?.findViewById<ImageView>(R.id.floating_btn_switch)?.setOnClickListener {
+            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
+            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
         }
-        overlayView!!.findViewById<ImageView>(R.id.floating_btn_close)?.setOnClickListener {
-            stopScrcpy()
-            hideOverlay()
-            stopSelf()
+        overlayView?.findViewById<ImageView>(R.id.floating_btn_close)?.setOnClickListener {
+            stopScrcpy(); hideOverlay(); stopSelf()
         }
     }
 
     private fun updateOverlaySize() {
         if (screenWidth <= 0 || screenHeight <= 0) return
-        val maxW = 400
+        val dm = resources.displayMetrics
+        val shortEdge = minOf(dm.widthPixels, dm.heightPixels)
+        val maxW = shortEdge * 4 / 5
         val ratio = screenHeight.toFloat() / screenWidth.toFloat()
         val w = maxW
         val h = (maxW * ratio).toInt()
-        layoutParams.width = w
-        layoutParams.height = h
-        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+        if (layoutParams.width != w || layoutParams.height != h) {
+            layoutParams.width = w; layoutParams.height = h
+            try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+        }
     }
 
     private fun startScrcpy() {
@@ -245,19 +263,20 @@ class ScrcpyFloatingService : Service() {
                 handler.post { updateOverlaySize() }
 
                 val tv = textureView ?: return@Thread
-                val tvW = tv.width; val tvH = tv.height
-                touchEventHandler = TouchEventHandler(
-                    sessionWidth = screenWidth.takeIf { it > 0 } ?: 1920,
-                    sessionHeight = screenHeight.takeIf { it > 0 } ?: 1080,
-                    touchAreaWidth = tvW,
-                    touchAreaHeight = tvH,
-                    onInjectTouch = { action, pointerId, x, y, pressure, actionButton, buttons ->
-                        val sw = screenWidth.takeIf { it > 0 } ?: 1920
-                        val sh = screenHeight.takeIf { it > 0 } ?: 1080
-                        session.sendTouchEvent(action, pointerId, x, y, sw, sh, pressure, actionButton, buttons)
-                    },
-                    onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
-                )
+                handler.post {
+                    touchEventHandler = TouchEventHandler(
+                        sessionWidth = screenWidth.takeIf { it > 0 } ?: 1920,
+                        sessionHeight = screenHeight.takeIf { it > 0 } ?: 1080,
+                        touchAreaWidth = tv.width,
+                        touchAreaHeight = tv.height,
+                        onInjectTouch = { action, pointerId, x, y, pressure, actionButton, buttons ->
+                            val sw = screenWidth.takeIf { it > 0 } ?: 1920
+                            val sh = screenHeight.takeIf { it > 0 } ?: 1080
+                            session.sendTouchEvent(action, pointerId, x, y, sw, sh, pressure, actionButton, buttons)
+                        },
+                        onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
+                    )
+                }
 
                 decodeVideo(session)
             } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); stopSelf() }
@@ -284,8 +303,7 @@ class ScrcpyFloatingService : Service() {
                         waitingForKeyFrame = true
                     }
                 }
-                lastPacketTime = now
-                continue
+                lastPacketTime = now; continue
             }
 
             if (gapMs > 200 && decoderConfigured) {
@@ -308,11 +326,12 @@ class ScrcpyFloatingService : Service() {
 
     private fun createDecoder(width: Int, height: Int) {
         releaseDecoder()
+        val s = surface ?: return
         try {
             val fmt = MediaFormat.createVideoFormat(codecMime, width, height)
             decoder = MediaCodec.createDecoderByType(codecMime)
             decoder!!.setCallback(decoderCallback, handler)
-            decoder!!.configure(fmt, surface, null, 0)
+            decoder!!.configure(fmt, s, null, 0)
             decoder!!.start()
             decoderConfigured = true
         } catch (e: Exception) { Log.e(TAG, "Decoder create failed", e); decoderConfigured = false }
@@ -329,7 +348,7 @@ class ScrcpyFloatingService : Service() {
         try {
             var inputIndex = inputBufferQueue.poll()
             if (inputIndex == null && (isConfig || isKeyFrame)) {
-                inputIndex = inputBufferQueue.poll(50, TimeUnit.MILLISECONDS)
+                inputIndex = inputBufferQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS)
             }
             if (inputIndex != null) {
                 val buf = d.getInputBuffer(inputIndex) ?: return
