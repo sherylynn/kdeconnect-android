@@ -171,7 +171,7 @@ class ScrcpyFloatingService : Service() {
                 startScrcpy()
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                // Don't change SurfaceTexture buffer size — TextureView scales automatically
+                // TextureView scales automatically — do nothing
             }
             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                 return false
