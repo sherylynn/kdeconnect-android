@@ -206,7 +206,14 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         val handler = touchEventHandler
         if (handler != null && isRunning) {
             handler.updateDimensions(surfaceView.width, surfaceView.height)
+            // Convert event coordinates from Activity window space to SurfaceView-local space
+            val location = IntArray(2)
+            surfaceView.getLocationOnScreen(location)
+            val localX = location[0].toFloat()
+            val localY = location[1].toFloat()
+            event.offsetLocation(-localX, -localY)
             handler.handleMotionEvent(event)
+            event.offsetLocation(localX, localY)
             return true
         }
         return super.dispatchTouchEvent(event)

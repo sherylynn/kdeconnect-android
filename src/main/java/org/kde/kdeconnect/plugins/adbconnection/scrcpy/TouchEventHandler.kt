@@ -8,6 +8,7 @@ import kotlin.math.roundToInt
 /**
  * TouchEventHandler - Ported from ScrcpyForAndroid.
  * Maps touch coordinates from view space to device screen space.
+ * Accounts for content bounds (letterboxing/pillarboxing).
  */
 class TouchEventHandler(
     private var sessionWidth: Int,
@@ -34,6 +35,13 @@ class TouchEventHandler(
         const val POINTER_UP = 6
     }
 
+    private data class ContentBounds(
+        val width: Float,
+        val height: Float,
+        val left: Float,
+        val top: Float,
+    )
+
     private val activePointerIds = LinkedHashSet<Int>()
     private val activePointerPositions = LinkedHashMap<Int, Pair<Float, Float>>()
 
@@ -52,18 +60,45 @@ class TouchEventHandler(
         sessionHeight = height
     }
 
+    private fun calculateContentBounds(): ContentBounds {
+        val sessionAspect = if (sessionHeight == 0) 16f / 9f
+            else sessionWidth.toFloat() / sessionHeight.toFloat()
+        val containerWidth = touchAreaWidth.toFloat()
+        val containerHeight = touchAreaHeight.toFloat()
+        if (containerWidth <= 0f || containerHeight <= 0f) {
+            return ContentBounds(containerWidth, containerHeight, 0f, 0f)
+        }
+        val containerAspect = containerWidth / containerHeight
+
+        val contentWidth: Float
+        val contentHeight: Float
+        if (sessionAspect > containerAspect) {
+            contentWidth = containerWidth
+            contentHeight = containerWidth / sessionAspect
+        } else {
+            contentHeight = containerHeight
+            contentWidth = containerHeight * sessionAspect
+        }
+        val contentLeft = (containerWidth - contentWidth) / 2f
+        val contentTop = (containerHeight - contentHeight) / 2f
+
+        return ContentBounds(contentWidth, contentHeight, contentLeft, contentTop)
+    }
+
     /**
      * Map raw touch coordinates to device screen coordinates.
-     * Directly maps from view space to device space (no content bounds).
+     * Accounts for content bounds (letterboxing/pillarboxing offset).
      */
-    private fun mapToDevice(rawX: Float, rawY: Float): Pair<Int, Int> {
+    private fun mapToDevice(rawX: Float, rawY: Float, bounds: ContentBounds): Pair<Int, Int> {
         val sw = sessionWidth.takeIf { it > 0 } ?: return 0 to 0
         val sh = sessionHeight.takeIf { it > 0 } ?: return 0 to 0
-        val vw = touchAreaWidth.takeIf { it > 0 } ?: return 0 to 0
-        val vh = touchAreaHeight.takeIf { it > 0 } ?: return 0 to 0
 
-        val x = (rawX * sw / vw).roundToInt().coerceIn(0, sw - 1)
-        val y = (rawY * sh / vh).roundToInt().coerceIn(0, sh - 1)
+        val normalizedX = ((rawX - bounds.left) / bounds.width).coerceIn(0f, 1f)
+        val normalizedY = ((rawY - bounds.top) / bounds.height).coerceIn(0f, 1f)
+        val x = (normalizedX * (sw - 1).coerceAtLeast(0)).roundToInt()
+            .coerceIn(0, (sw - 1).coerceAtLeast(0))
+        val y = (normalizedY * (sh - 1).coerceAtLeast(0)).roundToInt()
+            .coerceIn(0, (sh - 1).coerceAtLeast(0))
         return x to y
     }
 
@@ -71,24 +106,24 @@ class TouchEventHandler(
         val vw = touchAreaWidth
         val vh = touchAreaHeight
         if (vw <= 0 || vh <= 0) return true
-        val sw = sessionWidth.takeIf { it > 0 } ?: 1920
-        val sh = sessionHeight.takeIf { it > 0 } ?: 1080
+
+        val bounds = calculateContentBounds()
 
         if (isMouseLikeEvent(event)) {
-            return handleMouseEvent(event)
+            return handleMouseEvent(event, bounds)
         }
 
         if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
-            return handleCancelAction()
+            return handleCancelAction(bounds)
         }
 
         extractEventData(event)
-        handleDisappearedPointers()
+        handleDisappearedPointers(bounds)
 
         val endedPointerId = getEndedPointerId(event)
-        handlePointerDown(event, endedPointerId)
-        handlePointerMove(event, endedPointerId)
-        handlePointerUp(endedPointerId)
+        handlePointerDown(event, endedPointerId, bounds)
+        handlePointerMove(event, endedPointerId, bounds)
+        handlePointerUp(endedPointerId, bounds)
 
         return true
     }
@@ -101,8 +136,8 @@ class TouchEventHandler(
                 event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE
     }
 
-    private fun handleMouseEvent(event: MotionEvent): Boolean {
-        val (x, y) = mapToDevice(event.getX(0), event.getY(0))
+    private fun handleMouseEvent(event: MotionEvent, bounds: ContentBounds): Boolean {
+        val (x, y) = mapToDevice(event.getX(0), event.getY(0), bounds)
         val pressure = event.getPressure(0).coerceIn(0f, 1f)
         val buttons = event.buttonState
         val actionButton = event.actionButton
@@ -136,19 +171,19 @@ class TouchEventHandler(
         return true
     }
 
-    private fun releasePointer(pointerId: Int) {
+    private fun releasePointer(pointerId: Int, bounds: ContentBounds) {
         if (!activePointerIds.contains(pointerId)) return
         val pos = activePointerPositions[pointerId] ?: (0f to 0f)
-        val (x, y) = mapToDevice(pos.first, pos.second)
+        val (x, y) = mapToDevice(pos.first, pos.second, bounds)
         onInjectTouch(UiMotionActions.UP, pointerId.toLong(), x, y, 0f, 0, 0)
         activePointerIds.remove(pointerId)
         activePointerPositions.remove(pointerId)
     }
 
-    private fun handleCancelAction(): Boolean {
+    private fun handleCancelAction(bounds: ContentBounds): Boolean {
         val toCancel = activePointerIds.toList()
         for (pointerId in toCancel) {
-            releasePointer(pointerId)
+            releasePointer(pointerId, bounds)
         }
         return true
     }
@@ -165,10 +200,10 @@ class TouchEventHandler(
         }
     }
 
-    private fun handleDisappearedPointers() {
+    private fun handleDisappearedPointers(bounds: ContentBounds) {
         val disappearedPointers = activePointerIds.filter { it !in eventPointerIds }
         for (pointerId in disappearedPointers) {
-            releasePointer(pointerId)
+            releasePointer(pointerId, bounds)
         }
     }
 
@@ -179,7 +214,7 @@ class TouchEventHandler(
         }
     }
 
-    private fun handlePointerDown(event: MotionEvent, endedPointerId: Int?) {
+    private fun handlePointerDown(event: MotionEvent, endedPointerId: Int?, bounds: ContentBounds) {
         justPressedPointerIds.clear()
         for (i in 0 until event.pointerCount) {
             val pointerId = event.getPointerId(i)
@@ -187,7 +222,7 @@ class TouchEventHandler(
             val raw = eventPositions[pointerId] ?: continue
             val pressure = eventPressures[pointerId] ?: 0f
             if (!activePointerIds.contains(pointerId)) {
-                val (x, y) = mapToDevice(raw.first, raw.second)
+                val (x, y) = mapToDevice(raw.first, raw.second, bounds)
                 activePointerIds.add(pointerId)
                 activePointerPositions[pointerId] = raw
                 justPressedPointerIds.add(pointerId)
@@ -196,7 +231,7 @@ class TouchEventHandler(
         }
     }
 
-    private fun handlePointerMove(event: MotionEvent, endedPointerId: Int?) {
+    private fun handlePointerMove(event: MotionEvent, endedPointerId: Int?, bounds: ContentBounds) {
         for (i in 0 until event.pointerCount) {
             val pointerId = event.getPointerId(i)
             if (!activePointerIds.contains(pointerId)) continue
@@ -205,18 +240,18 @@ class TouchEventHandler(
             val raw = eventPositions[pointerId] ?: continue
             val pressure = eventPressures[pointerId] ?: 0f
             activePointerPositions[pointerId] = raw
-            val (x, y) = mapToDevice(raw.first, raw.second)
+            val (x, y) = mapToDevice(raw.first, raw.second, bounds)
             onInjectTouch(UiMotionActions.MOVE, pointerId.toLong(), x, y, pressure, 0, 0)
         }
     }
 
-    private fun handlePointerUp(endedPointerId: Int?) {
+    private fun handlePointerUp(endedPointerId: Int?, bounds: ContentBounds) {
         if (endedPointerId != null) {
             val endPos = eventPositions[endedPointerId]
             if (endPos != null) {
                 activePointerPositions[endedPointerId] = endPos
             }
-            releasePointer(endedPointerId)
+            releasePointer(endedPointerId, bounds)
         }
     }
 }
