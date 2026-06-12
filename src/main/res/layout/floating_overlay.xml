@@ -1,16 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
     android:background="#DD1A1A1E"
     android:elevation="8dp">
 
-    <!-- Drag bar -->
+    <!-- Video surface fills entire overlay -->
+    <TextureView
+        android:id="@+id/floating_texture"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Drag bar on top -->
     <FrameLayout
         android:id="@+id/floating_drag_bar"
         android:layout_width="match_parent"
         android:layout_height="28dp"
+        android:layout_gravity="top"
         android:padding="4dp">
 
         <View
@@ -20,19 +26,14 @@
             android:background="#66FFFFFF" />
     </FrameLayout>
 
-    <!-- Video surface -->
-    <TextureView
-        android:id="@+id/floating_texture"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
-
-    <!-- Control buttons -->
+    <!-- Control buttons at bottom -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="32dp"
+        android:layout_gravity="bottom"
         android:orientation="horizontal"
         android:gravity="center"
+        android:background="#CC1A1A1E"
         android:paddingHorizontal="4dp">
 
         <ImageView
@@ -76,4 +77,4 @@
             android:tint="#ca5357" />
     </LinearLayout>
 
-</LinearLayout>
+</FrameLayout>

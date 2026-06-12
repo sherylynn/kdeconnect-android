@@ -241,11 +241,23 @@ class ScrcpyFloatingService : Service() {
     private fun updateOverlaySize() {
         if (screenWidth <= 0 || screenHeight <= 0) return
         val dm = resources.displayMetrics
-        val shortEdge = minOf(dm.widthPixels, dm.heightPixels)
+        val screenW = dm.widthPixels
+        val screenH = dm.heightPixels
+        val shortEdge = minOf(screenW, screenH)
         val maxW = shortEdge * 4 / 5
-        val ratio = screenHeight.toFloat() / screenWidth.toFloat()
-        val w = maxW
-        val h = (maxW * ratio).toInt()
+        val videoRatio = screenHeight.toFloat() / screenWidth.toFloat()
+        val w: Int
+        val h: Int
+        // Fit within screen while maintaining video aspect ratio
+        if (videoRatio > 1f) {
+            // Portrait video: limit by height
+            h = minOf(maxW, (screenH * 4 / 5))
+            w = (h / videoRatio).toInt()
+        } else {
+            // Landscape video: limit by width
+            w = maxW
+            h = (w * videoRatio).toInt()
+        }
         if (layoutParams.width != w || layoutParams.height != h) {
             layoutParams.width = w; layoutParams.height = h
             try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
