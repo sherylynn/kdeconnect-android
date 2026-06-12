@@ -171,15 +171,7 @@ class ScrcpyFloatingService : Service() {
                 startScrcpy()
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                // Update surface buffer size and recreate decoder for new dimensions
-                if (w > 0 && h > 0) {
-                    st.setDefaultBufferSize(w, h)
-                    if (decoderConfigured) {
-                        mainHandler.post {
-                            createDecoder(screenWidth, screenHeight)
-                        }
-                    }
-                }
+                // Don't change SurfaceTexture buffer size — TextureView scales automatically
             }
             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                 return false
@@ -287,24 +279,23 @@ class ScrcpyFloatingService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun setupResizeHandle() {
         val resize = overlayView?.findViewById<View>(R.id.floating_resize) ?: return
-        val minSize = 200
-        var startX = 0; var startY = 0
-        var startW = 0; var startH = 0
+        val minSize = 150
+        var lastRawX = 0; var lastRawY = 0
 
         resize.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    startX = event.rawX.toInt()
-                    startY = event.rawY.toInt()
-                    startW = layoutParams.width
-                    startH = layoutParams.height
+                    lastRawX = event.rawX.toInt()
+                    lastRawY = event.rawY.toInt()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX.toInt() - startX
-                    val dy = event.rawY.toInt() - startY
-                    val newW = (startW + dx).coerceAtLeast(minSize)
-                    val newH = (startH + dy).coerceAtLeast(minSize)
+                    val dx = event.rawX.toInt() - lastRawX
+                    val dy = event.rawY.toInt() - lastRawY
+                    lastRawX = event.rawX.toInt()
+                    lastRawY = event.rawY.toInt()
+                    val newW = (layoutParams.width + dx).coerceAtLeast(minSize)
+                    val newH = (layoutParams.height + dy).coerceAtLeast(minSize)
                     layoutParams.width = newW
                     layoutParams.height = newH
                     try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
