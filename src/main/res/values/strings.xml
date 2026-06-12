@@ -48,6 +48,10 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="pref_plugin_ping_desc">Send and receive pings</string>
     <string name="pref_plugin_adbconnection">ADB Connection</string>
     <string name="pref_plugin_adbconnection_desc">Connect to device via ADB and scrcpy</string>
+    <string name="pref_plugin_portforward">Port Forward</string>
+    <string name="pref_plugin_portforward_desc">Forward TCP/UDP ports between devices</string>
+    <string name="port_forward_open">Port Forward</string>
+    <string name="port_forward_title">Port Forward</string>
     <string name="adb_connect">Connect</string>
     <string name="adb_disconnect">Disconnect</string>
     <string name="adb_scrcpy">Scrcpy</string>
