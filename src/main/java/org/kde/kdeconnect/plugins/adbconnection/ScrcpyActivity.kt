@@ -47,6 +47,8 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private var screenHeight = 0
     private var decoderConfigured = false
     private var codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
+    private val inputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
+    private val decoderHandler = Handler(Looper.getMainLooper())
 
     private var host: String = ""
     private var port: Int = 0
@@ -329,7 +331,41 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         moreMenuHandler.postDelayed(moreMenuRunnable!!, 3000)
     }
 
-    // ============ Decoder Methods ============
+    // ============ Decoder Methods (Async Callback like EasyControl) ============
+
+    private val decoderCallback = object : MediaCodec.Callback() {
+        override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
+            inputBufferQueue.offer(index)
+        }
+
+        override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+            try {
+                codec.releaseOutputBuffer(index, info.presentationTimeUs)
+            } catch (e: Exception) { Log.e(TAG, "Release output buffer error", e) }
+        }
+
+        override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+            Log.e(TAG, "Decoder error", e)
+        }
+
+        override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+            val w = if (format.containsKey("crop-right") && format.containsKey("crop-left"))
+                format.getInteger("crop-right") - format.getInteger("crop-left") + 1
+            else format.getInteger(MediaFormat.KEY_WIDTH)
+            val h = if (format.containsKey("crop-bottom") && format.containsKey("crop-top"))
+                format.getInteger("crop-bottom") - format.getInteger("crop-top") + 1
+            else format.getInteger(MediaFormat.KEY_HEIGHT)
+            Log.i(TAG, "Output format changed: ${w}x${h}")
+            if (w > 0 && h > 0) {
+                screenWidth = w; screenHeight = h
+                runOnUiThread {
+                    surfaceView.setVideoDimensions(screenWidth, screenHeight)
+                    requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    touchEventHandler?.updateSessionDimensions(screenWidth, screenHeight)
+                }
+            }
+        }
+    }
 
     private fun createDecoder(width: Int, height: Int) {
         releaseDecoder()
@@ -337,6 +373,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             Log.i(TAG, "Creating decoder: ${codecMime} ${width}x${height}")
             val format = MediaFormat.createVideoFormat(codecMime, width, height)
             decoder = MediaCodec.createDecoderByType(codecMime)
+            decoder!!.setCallback(decoderCallback, decoderHandler)
             decoder!!.configure(format, surface, null, 0)
             decoder!!.start()
             decoderConfigured = true
@@ -344,6 +381,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     }
 
     private fun releaseDecoder() {
+        inputBufferQueue.clear()
         try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
         decoder = null; decoderConfigured = false
     }
@@ -351,9 +389,11 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {
         val d = decoder ?: return
         try {
-            var inputIndex = d.dequeueInputBuffer(10_000)
-            if (inputIndex < 0 && (isConfig || isKeyFrame)) { drainOutput(); inputIndex = d.dequeueInputBuffer(50_000) }
-            if (inputIndex >= 0) {
+            var inputIndex = inputBufferQueue.poll()
+            if (inputIndex == null && (isConfig || isKeyFrame)) {
+                inputIndex = inputBufferQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
+            if (inputIndex != null) {
                 val buf = d.getInputBuffer(inputIndex) ?: return
                 buf.clear(); buf.put(data)
                 var flags = 0
@@ -361,30 +401,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 if (isConfig) flags = flags or MediaCodec.BUFFER_FLAG_CODEC_CONFIG
                 d.queueInputBuffer(inputIndex, 0, data.size, ptsUs, flags)
             }
-            drainOutput()
         } catch (e: Exception) { Log.e(TAG, "Feed error", e) }
-    }
-
-    private fun drainOutput() {
-        val d = decoder ?: return
-        val bufferInfo = MediaCodec.BufferInfo()
-        while (true) {
-            val outIndex = d.dequeueOutputBuffer(bufferInfo, 0)
-            when {
-                outIndex >= 0 -> d.releaseOutputBuffer(outIndex, true)
-                outIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    if (!gotOutputFormat.getAndSet(true)) {
-                        val fmt = d.outputFormat
-                        val w = if (fmt.containsKey("crop-right") && fmt.containsKey("crop-left")) fmt.getInteger("crop-right") - fmt.getInteger("crop-left") + 1 else fmt.getInteger(MediaFormat.KEY_WIDTH)
-                        val h = if (fmt.containsKey("crop-bottom") && fmt.containsKey("crop-top")) fmt.getInteger("crop-bottom") - fmt.getInteger("crop-top") + 1 else fmt.getInteger(MediaFormat.KEY_HEIGHT)
-                        Log.i(TAG, "Output format: ${w}x${h}")
-                        if (w > 0 && h > 0) { screenWidth = w; screenHeight = h }
-                    }
-                    continue
-                }
-                else -> return
-            }
-        }
     }
 
     private fun startScrcpy() {
