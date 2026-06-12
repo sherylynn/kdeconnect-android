@@ -281,65 +281,61 @@ class ScrcpyFloatingService : Service() {
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupResizeHandles() {
-        val minSize = 200
+        val minSize = 150
 
-        // Bottom-right: width/height grow
-        setupCornerResize(R.id.resize_br, minSize) { dx, dy ->
-            layoutParams.width = (layoutParams.width + dx).coerceAtLeast(minSize)
-            layoutParams.height = (layoutParams.height + dy).coerceAtLeast(minSize)
+        // Bottom-right: anchor = top-left (x, y)
+        setupCornerResize(R.id.resize_br, minSize) { anchorX, anchorY, rawX, rawY ->
+            layoutParams.x = anchorX
+            layoutParams.y = anchorY
+            layoutParams.width = (rawX - anchorX).coerceAtLeast(minSize)
+            layoutParams.height = (rawY - anchorY).coerceAtLeast(minSize)
         }
 
-        // Bottom-left: x moves left, width grows right
-        setupCornerResize(R.id.resize_bl, minSize) { dx, dy ->
-            val newW = (layoutParams.width - dx).coerceAtLeast(minSize)
-            layoutParams.x = layoutParams.x + (layoutParams.width - newW)
+        // Top-left: anchor = bottom-right (x + width, y + height)
+        setupCornerResize(R.id.resize_tl, minSize) { anchorX, anchorY, rawX, rawY ->
+            val newW = (anchorX - rawX).coerceAtLeast(minSize)
+            val newH = (anchorY - rawY).coerceAtLeast(minSize)
+            layoutParams.x = anchorX - newW
+            layoutParams.y = anchorY - newH
             layoutParams.width = newW
-            layoutParams.height = (layoutParams.height + dy).coerceAtLeast(minSize)
+            layoutParams.height = newH
         }
 
-        // Top-right: width grows, y moves up
-        setupCornerResize(R.id.resize_tr, minSize) { dx, dy ->
-            layoutParams.width = (layoutParams.width + dx).coerceAtLeast(minSize)
-            val newH = (layoutParams.height - dy).coerceAtLeast(minSize)
-            layoutParams.y = layoutParams.y + (layoutParams.height - newH)
+        // Top-right: anchor = bottom-left (x, y + height)
+        setupCornerResize(R.id.resize_tr, minSize) { anchorX, anchorY, rawX, rawY ->
+            val newH = (anchorY - rawY).coerceAtLeast(minSize)
+            layoutParams.x = anchorX
+            layoutParams.y = anchorY - newH
+            layoutParams.width = (rawX - anchorX).coerceAtLeast(minSize)
             layoutParams.height = newH
         }
 
-        // Top-left: x moves left, y moves up
-        setupCornerResize(R.id.resize_tl, minSize) { dx, dy ->
-            val newW = (layoutParams.width - dx).coerceAtLeast(minSize)
-            val newH = (layoutParams.height - dy).coerceAtLeast(minSize)
-            layoutParams.x = layoutParams.x + (layoutParams.width - newW)
-            layoutParams.y = layoutParams.y + (layoutParams.height - newH)
+        // Bottom-left: anchor = top-right (x + width, y)
+        setupCornerResize(R.id.resize_bl, minSize) { anchorX, anchorY, rawX, rawY ->
+            val newW = (anchorX - rawX).coerceAtLeast(minSize)
+            layoutParams.x = anchorX - newW
+            layoutParams.y = anchorY
             layoutParams.width = newW
-            layoutParams.height = newH
+            layoutParams.height = (rawY - anchorY).coerceAtLeast(minSize)
         }
     }
 
-    private fun setupCornerResize(viewId: Int, minSize: Int, onResize: (Int, Int) -> Unit) {
+    private fun setupCornerResize(viewId: Int, minSize: Int, onResize: (anchorX: Int, anchorY: Int, rawX: Int, rawY: Int) -> Unit) {
         val view = overlayView?.findViewById<View>(viewId) ?: return
-        var lastX = 0; var lastY = 0
 
         view.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    lastX = event.rawX.toInt()
-                    lastY = event.rawY.toInt()
-                    true
+            if (event.action == MotionEvent.ACTION_DOWN) {
+                // Record anchor = opposite corner position
+                view.tag = intArrayOf(layoutParams.x, layoutParams.y)
+                true
+            } else if (event.action == MotionEvent.ACTION_MOVE) {
+                val anchor = view.tag as? IntArray ?: return@setOnTouchListener false
+                onResize(anchor[0], anchor[1], event.rawX.toInt(), event.rawY.toInt())
+                mainHandler.post {
+                    try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
                 }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = event.rawX.toInt() - lastX
-                    val dy = event.rawY.toInt() - lastY
-                    lastX = event.rawX.toInt()
-                    lastY = event.rawY.toInt()
-                    onResize(dx, dy)
-                    mainHandler.post {
-                        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
-                    }
-                    true
-                }
-                else -> false
-            }
+                true
+            } else false
         }
     }
 
