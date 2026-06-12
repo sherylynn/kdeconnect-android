@@ -448,6 +448,15 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
 
     private fun stopScrcpy() {
         isRunning = false; gotOutputFormat.set(false); releaseDecoder()
+        
+        // Lock device on disconnect if enabled
+        val prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(this)
+        if (prefs.getBoolean("scrcpy_lock_on_disconnect", false)) {
+            scrcpySession?.lockDevice()
+            // Wait a bit for the lock command to be sent
+            try { Thread.sleep(100) } catch (e: InterruptedException) { }
+        }
+        
         scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
     }
 

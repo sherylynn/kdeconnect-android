@@ -1,6 +1,7 @@
 package org.kde.kdeconnect.plugins.adbconnection.scrcpy
 
 import android.content.Context
+import android.view.KeyEvent
 import android.util.Log
 import java.io.BufferedInputStream
 import java.io.DataInputStream
@@ -388,6 +389,12 @@ class ScrcpySession(
         } catch (e: Exception) {
             Log.e(TAG, "setDisplayPower failed", e)
         }
+    }
+
+    fun lockDevice() {
+        // Send power key event to lock the device
+        sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
+        sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
     }
 
     fun sendText(text: String) {

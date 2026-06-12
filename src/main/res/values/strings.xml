@@ -701,6 +701,8 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="scrcpy_stay_awake_summary">Keep remote device screen on</string>
     <string name="scrcpy_turn_screen_off">Turn Screen Off</string>
     <string name="scrcpy_turn_screen_off_summary">Turn off remote device screen while mirroring</string>
+    <string name="scrcpy_lock_on_disconnect">Lock On Disconnect</string>
+    <string name="scrcpy_lock_on_disconnect_summary">Lock remote device when scrcpy connection is closed</string>
     <string name="scrcpy_floating_button">Control</string>
     <string name="scrcpy_app_switch">App Switch</string>
     <string name="scrcpy_power">Power</string>

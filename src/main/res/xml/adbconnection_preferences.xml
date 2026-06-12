@@ -32,7 +32,7 @@
         <ListPreference
             android:key="scrcpy_video_codec"
             android:title="@string/scrcpy_video_codec"
-            android:summary="@string/scrcpy_video_codec_summary"
+            android:summary="%s"
             android:entries="@array/scrcpy_video_codec_entries"
             android:entryValues="@array/scrcpy_video_codec_values"
             android:defaultValue="h264"
@@ -41,7 +41,7 @@
         <EditTextPreference
             android:key="scrcpy_max_size"
             android:title="@string/scrcpy_max_size"
-            android:summary="@string/scrcpy_max_size_summary"
+            android:summary="%s"
             android:defaultValue="0"
             android:dialogTitle="@string/scrcpy_max_size_dialog"
             android:inputType="number"
@@ -50,7 +50,7 @@
         <EditTextPreference
             android:key="scrcpy_max_fps"
             android:title="@string/scrcpy_max_fps"
-            android:summary="@string/scrcpy_max_fps_summary"
+            android:summary="%s"
             android:defaultValue=""
             android:dialogTitle="@string/scrcpy_max_fps_dialog"
             android:inputType="number"
@@ -59,7 +59,7 @@
         <EditTextPreference
             android:key="scrcpy_video_bit_rate"
             android:title="@string/scrcpy_video_bit_rate"
-            android:summary="@string/scrcpy_video_bit_rate_summary"
+            android:summary="%s bps"
             android:defaultValue="0"
             android:dialogTitle="@string/scrcpy_video_bit_rate_dialog"
             android:inputType="number"
@@ -101,6 +101,13 @@
             android:summary="@string/scrcpy_turn_screen_off_summary"
             android:defaultValue="false"
             app:key="scrcpy_turn_screen_off" />
+
+        <SwitchPreferenceCompat
+            android:key="scrcpy_lock_on_disconnect"
+            android:title="@string/scrcpy_lock_on_disconnect"
+            android:summary="@string/scrcpy_lock_on_disconnect_summary"
+            android:defaultValue="false"
+            app:key="scrcpy_lock_on_disconnect" />
 
     </PreferenceCategory>
 
