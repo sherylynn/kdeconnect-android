@@ -180,6 +180,16 @@
       android:src="@drawable/lock"
       android:tint="#FFFFFF" />
 
+    <ImageView
+      android:id="@+id/button_floating"
+      android:layout_width="38dp"
+      android:layout_height="38dp"
+      android:layout_margin="4dp"
+      android:focusable="false"
+      android:src="@android:drawable/ic_menu_send"
+      android:tint="#FFFFFF"
+      android:contentDescription="Floating window" />
+
   </GridLayout>
 
   <!-- Legacy floating button (kept for compatibility) -->

@@ -1,6 +1,7 @@
 package org.kde.kdeconnect.plugins.adbconnection
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.MediaCodec
 import android.media.MediaFormat
@@ -297,6 +298,11 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             scrcpySession?.lockDevice()
             resetBarViewTimer()
         }
+        // Floating window
+        findViewById<ImageView>(R.id.button_floating).setOnClickListener {
+            switchToFloating()
+            resetBarViewTimer()
+        }
     }
 
     private fun setupMoreButton() {
@@ -447,6 +453,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private fun decodeVideo(session: ScrcpySession) {
         isRunning = true
         var lastPacketTime = System.currentTimeMillis()
+        var waitingForKeyFrame = false
         while (isRunning) {
             val packet = session.readVideoPacket() ?: break
             val now = System.currentTimeMillis()
@@ -456,11 +463,12 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                     val newW = packet.width
                     val newH = packet.height
                     val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
+                    val wasGapped = now - lastPacketTime > 300
                     screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured) {
+                    if (sizeChanged || !decoderConfigured || wasGapped) {
+                        Log.i(TAG, "Recreating decoder: ${newW}x${newH} sizeChanged=$sizeChanged gapped=$wasGapped")
                         createDecoder(newW, newH)
-                    } else if (decoderConfigured) {
-                        try { decoder?.flush() } catch (_: Exception) {}
+                        waitingForKeyFrame = true
                     }
                     runOnUiThread {
                         surfaceView.setVideoDimensions(screenWidth, screenHeight)
@@ -472,14 +480,22 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 continue
             }
 
-            // Detect stream gap (screen lock/unlock) — flush decoder for fresh start
-            if (decoderConfigured && (now - lastPacketTime > 500)) {
-                Log.i(TAG, "Stream gap ${(now - lastPacketTime)}ms, flushing decoder")
-                try { decoder?.flush() } catch (_: Exception) {}
+            // Detect stream gap (screen lock/unlock)
+            if (decoderConfigured && (now - lastPacketTime > 300)) {
+                Log.i(TAG, "Stream gap ${(now - lastPacketTime)}ms, will recreate decoder on next session")
+                waitingForKeyFrame = true
             }
             lastPacketTime = now
+
             if (packet.data.isEmpty()) continue
-            if (!decoderConfigured) { if (screenWidth <= 0 || screenHeight <= 0) continue; createDecoder(screenWidth, screenHeight) }
+            if (!decoderConfigured) {
+                if (screenWidth <= 0 || screenHeight <= 0) continue
+                createDecoder(screenWidth, screenHeight)
+                waitingForKeyFrame = true
+            }
+            // After a gap, wait for keyframe to re-sync decoder
+            if (waitingForKeyFrame && !packet.isKeyFrame && !packet.isConfig) continue
+            if (packet.isKeyFrame) waitingForKeyFrame = false
             feedPacket(packet.data, packet.ptsUs, packet.isConfig, packet.isKeyFrame)
         }
     }
@@ -498,6 +514,21 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         }
         
         scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
+    }
+
+    private fun switchToFloating() {
+        val intent = Intent(this, ScrcpyFloatingActivity::class.java).apply {
+            putExtra(ScrcpyFloatingActivity.EXTRA_HOST, host)
+            putExtra(ScrcpyFloatingActivity.EXTRA_PORT, port)
+            putExtra(ScrcpyFloatingActivity.EXTRA_PREFS_NAME, prefsName)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        }
+        // Stop current session before switching
+        isRunning = false
+        releaseDecoder()
+        scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
+        startActivity(intent)
+        finish()
     }
 
     // Picture-in-Picture support

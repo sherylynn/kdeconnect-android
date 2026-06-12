@@ -495,6 +495,14 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
             android:resizeableActivity="true" />
 
         <activity
+            android:name="org.kde.kdeconnect.plugins.adbconnection.ScrcpyFloatingActivity"
+            android:label="@string/scrcpy_connecting"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true" />
+
+        <activity
             android:name="org.kde.kdeconnect.plugins.portforward.PortForwardActivity"
             android:label="@string/port_forward_title"
             android:theme="@style/KdeConnectTheme.NoActionBar"
