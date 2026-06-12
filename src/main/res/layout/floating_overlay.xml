@@ -5,13 +5,11 @@
     android:background="#DD1A1A1E"
     android:elevation="8dp">
 
-    <!-- Video surface fills entire overlay -->
     <TextureView
         android:id="@+id/floating_texture"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
-    <!-- Drag bar on top -->
     <FrameLayout
         android:id="@+id/floating_drag_bar"
         android:layout_width="match_parent"
@@ -26,7 +24,13 @@
             android:background="#66FFFFFF" />
     </FrameLayout>
 
-    <!-- Control buttons at bottom -->
+    <View
+        android:id="@+id/floating_resize"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_gravity="end|bottom"
+        android:background="#33FFFFFF" />
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="32dp"
@@ -64,6 +68,16 @@
             android:focusable="false"
             android:padding="4dp"
             android:src="@drawable/square"
+            android:tint="#DEDEDE" />
+
+        <ImageView
+            android:id="@+id/floating_btn_fullscreen"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:focusable="false"
+            android:padding="4dp"
+            android:src="@drawable/compress"
             android:tint="#DEDEDE" />
 
         <ImageView

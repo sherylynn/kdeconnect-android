@@ -52,6 +52,7 @@ class ScrcpyFloatingService : Service() {
     private var codecHandler: Handler? = null
     private var codecHandlerThread: HandlerThread? = null
     private var surfaceReady = false
+    private val pointerDownTimes = LongArray(10)
 
     private lateinit var layoutParams: WindowManager.LayoutParams
     private var host = ""
@@ -149,6 +150,7 @@ class ScrcpyFloatingService : Service() {
 
         setupTextureView()
         setupDragBar()
+        setupResizeHandle()
         setupControlBar()
 
         windowManager!!.addView(overlayView, layoutParams)
@@ -176,29 +178,40 @@ class ScrcpyFloatingService : Service() {
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
 
-        // Forward touch events to remote device — direct normalized coordinates (like EasyControl)
+        // Forward touch events to remote device — like EasyControl's ClientView
         tv.setOnTouchListener { view, event ->
             val session = scrcpySession ?: return@setOnTouchListener false
             if (!isRunning) return@setOnTouchListener false
             val w = view.width; val h = view.height
             if (w <= 0 || h <= 0) return@setOnTouchListener false
 
-            val action = when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> 0
-                MotionEvent.ACTION_UP -> 1
+            val actionMasked = event.actionMasked
+            if (actionMasked == MotionEvent.ACTION_DOWN || actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+                val i = event.actionIndex
+                pointerDownTimes[i] = event.eventTime
+            }
+
+            val scrcpyAction = when (actionMasked) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> 0
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> 1
                 MotionEvent.ACTION_MOVE -> 2
-                MotionEvent.ACTION_POINTER_DOWN -> 5
-                MotionEvent.ACTION_POINTER_UP -> 6
                 MotionEvent.ACTION_CANCEL -> 3
                 else -> return@setOnTouchListener false
             }
 
             for (i in 0 until event.pointerCount) {
                 val pointerId = event.getPointerId(i)
-                val x = (event.getX(i) / w * screenWidth).toInt().coerceIn(0, screenWidth - 1)
-                val y = (event.getY(i) / h * screenHeight).toInt().coerceIn(0, screenHeight - 1)
-                val pressure = event.getPressure(i).coerceIn(0f, 1f)
-                session.sendTouchEvent(action, pointerId.toLong(), x, y, screenWidth, screenHeight, pressure, 0, 0)
+                val offsetTime = (event.eventTime - pointerDownTimes[i.coerceIn(0, 9)]).toInt()
+                var x = event.getX(i) / w
+                var y = event.getY(i) / h
+                // Clamp to 0-1 like EasyControl
+                if (x < 0f || x > 1f || y < 0f || y > 1f) {
+                    x = x.coerceIn(0f, 1f)
+                    y = y.coerceIn(0f, 1f)
+                }
+                val devX = (x * (screenWidth - 1).coerceAtLeast(0)).toInt().coerceIn(0, screenWidth - 1)
+                val devY = (y * (screenHeight - 1).coerceAtLeast(0)).toInt().coerceIn(0, screenHeight - 1)
+                session.sendTouchEvent(scrcpyAction, pointerId.toLong(), devX, devY, screenWidth, screenHeight, 1f, 0, 0)
             }
             true
         }
@@ -246,8 +259,50 @@ class ScrcpyFloatingService : Service() {
             scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
             scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
         }
+        overlayView?.findViewById<ImageView>(R.id.floating_btn_fullscreen)?.setOnClickListener {
+            // Switch back to full screen activity
+            val intent = Intent(this, ScrcpyActivity::class.java).apply {
+                putExtra(ScrcpyActivity.EXTRA_HOST, host)
+                putExtra(ScrcpyActivity.EXTRA_PORT, port)
+                putExtra(ScrcpyActivity.EXTRA_PREFS_NAME, prefsName)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+            stopScrcpy(); hideOverlay(); stopSelf()
+        }
         overlayView?.findViewById<ImageView>(R.id.floating_btn_close)?.setOnClickListener {
             stopScrcpy(); hideOverlay(); stopSelf()
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupResizeHandle() {
+        val resize = overlayView?.findViewById<View>(R.id.floating_resize) ?: return
+        val minSize = 200
+        var startX = 0; var startY = 0
+        var startW = 0; var startH = 0
+
+        resize.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX.toInt()
+                    startY = event.rawY.toInt()
+                    startW = layoutParams.width
+                    startH = layoutParams.height
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX.toInt() - startX
+                    val dy = event.rawY.toInt() - startY
+                    val newW = (startW + dx).coerceAtLeast(minSize)
+                    val newH = (startH + dy).coerceAtLeast(minSize)
+                    layoutParams.width = newW
+                    layoutParams.height = newH
+                    try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    true
+                }
+                else -> false
+            }
         }
     }
 
