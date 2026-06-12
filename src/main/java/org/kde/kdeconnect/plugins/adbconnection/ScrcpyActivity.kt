@@ -206,14 +206,6 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0
                 screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
 
-                // Read turn screen off setting
-                val settings = if (prefsName.isNotBlank()) getSharedPreferences(prefsName, MODE_PRIVATE) else null
-                val turnScreenOff = settings?.getBoolean("scrcpy_turn_screen_off", false) ?: false
-                if (turnScreenOff) {
-                    Log.i(TAG, "Turning off remote screen...")
-                    session.setDisplayPower(false)
-                }
-
                 var viewWidth = 0; var viewHeight = 0
                 val latch = CountDownLatch(1)
                 runOnUiThread { viewWidth = surfaceView.width; viewHeight = surfaceView.height; latch.countDown() }

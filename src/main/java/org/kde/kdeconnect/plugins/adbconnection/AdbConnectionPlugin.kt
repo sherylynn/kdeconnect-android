@@ -40,6 +40,8 @@ class AdbConnectionPlugin : Plugin() {
 
     override fun hasSettings(): Boolean = true
 
+    override fun supportsDeviceSpecificSettings(): Boolean = false
+
     override fun getSettingsFragment(activity: Activity): org.kde.kdeconnect.ui.PluginSettingsFragment {
         return AdbConnectionSettingsFragment.newInstance(pluginKey, R.xml.adbconnection_preferences)
     }

@@ -230,6 +230,17 @@ class ScrcpySession(
 
             isRunning = true
             Log.i(TAG, "Scrcpy session started: device=$deviceName")
+
+            // Turn screen off if requested
+            if (turnScreenOff) {
+                if (!control) {
+                    Log.w(TAG, "turnScreenOff ignored because control is disabled")
+                } else {
+                    Log.i(TAG, "Turning screen off as requested")
+                    setDisplayPower(false)
+                }
+            }
+
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start scrcpy session", e)
@@ -360,20 +371,15 @@ class ScrcpySession(
     fun setDisplayPower(on: Boolean) {
         val output = controlOutput ?: return
         try {
-            val buf = java.io.ByteArrayOutputStream(2)
-            val dos = java.io.DataOutputStream(buf)
-            dos.writeByte(TYPE_SET_DISPLAY_POWER)
-            dos.writeBoolean(on)
-            dos.flush()
-            Thread {
-                try {
-                    synchronized(output) {
-                        output.write(buf.toByteArray())
-                        output.flush()
-                    }
-                } catch (e: Exception) { Log.e(TAG, "setDisplayPower write failed", e) }
-            }.start()
-        } catch (e: Exception) { Log.e(TAG, "setDisplayPower failed", e) }
+            synchronized(output) {
+                output.writeByte(TYPE_SET_DISPLAY_POWER)
+                output.writeBoolean(on)
+                output.flush()
+            }
+            Log.i(TAG, "setDisplayPower($on) sent")
+        } catch (e: Exception) {
+            Log.e(TAG, "setDisplayPower failed", e)
+        }
     }
 
     fun stop() { closed = true; isRunning = false; cleanup() }

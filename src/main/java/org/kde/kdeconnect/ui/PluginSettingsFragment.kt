@@ -44,7 +44,7 @@ open class PluginSettingsFragment : PreferenceFragmentCompat() {
     }
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
-        if (this.plugin != null && this.plugin!!.supportsDeviceSpecificSettings()) {
+        if (this.plugin != null) {
             val prefsManager = getPreferenceManager()
             prefsManager.setSharedPreferencesName(this.plugin!!.sharedPreferencesName)
             prefsManager.setSharedPreferencesMode(Context.MODE_PRIVATE)
