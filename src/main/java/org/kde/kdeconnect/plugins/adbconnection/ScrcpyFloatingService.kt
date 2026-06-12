@@ -282,33 +282,30 @@ class ScrcpyFloatingService : Service() {
         val minSize = 150
 
         resize.setOnTouchListener { _, event ->
+            // Always consume like EasyControl
             when (event.action) {
                 MotionEvent.ACTION_MOVE -> {
-                    // Calculate new size = touch position to overlay top-left (like EasyControl)
+                    if (screenWidth <= 0 || screenHeight <= 0) return@setOnTouchListener true
+                    // New size = touch position to overlay top-left (like EasyControl)
                     val newX = event.rawX.toInt() - layoutParams.x
                     val newY = event.rawY.toInt() - layoutParams.y
                     if (newX < minSize || newY < minSize) return@setOnTouchListener true
 
-                    // Calculate TextureView size maintaining video aspect ratio
-                    if (screenWidth > 0 && screenHeight > 0) {
-                        val videoRatio = screenWidth.toFloat() / screenHeight.toFloat()
-                        val w: Int
-                        val h: Int
-                        if (newX.toFloat() / newY > videoRatio) {
-                            h = newY
-                            w = (h * videoRatio).toInt()
-                        } else {
-                            w = newX
-                            h = (w / videoRatio).toInt()
-                        }
-                        layoutParams.width = w
-                        layoutParams.height = h
-                        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    // Calculate size maintaining video aspect ratio
+                    val videoRatio = screenWidth.toFloat() / screenHeight.toFloat()
+                    val w: Int
+                    val h: Int
+                    if (newX.toFloat() / newY > videoRatio) {
+                        h = newY; w = (h * videoRatio).toInt()
+                    } else {
+                        w = newX; h = (w / videoRatio).toInt()
                     }
-                    true
+                    // Update overlay window size — TextureView is match_parent so it follows
+                    layoutParams.width = w; layoutParams.height = h
+                    try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
                 }
-                else -> false
             }
+            true // Always consume (like EasyControl)
         }
     }
 
