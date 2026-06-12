@@ -162,8 +162,10 @@ class ScrcpySession(
             )
             val stayAwake = settings.getBoolean("scrcpy_stay_awake", false)
             val turnScreenOff = settings.getBoolean("scrcpy_turn_screen_off", false)
+            val appStream = settings.getString("scrcpy_app_stream", "") ?: ""
+            val newDisplay = settings.getString("scrcpy_new_display", "") ?: ""
 
-            Log.i(TAG, "Settings: codec=$videoCodec, maxSize=$maxSize, maxFps=$maxFps, bitRate=$videoBitRate, control=$control")
+            Log.i(TAG, "Settings: codec=$videoCodec, maxSize=$maxSize, maxFps=$maxFps, bitRate=$videoBitRate, control=$control, appStream=$appStream, newDisplay=$newDisplay")
 
             val options = ClientOptions(
                 video = true,
@@ -177,6 +179,8 @@ class ScrcpySession(
                 keyInjectMode = keyInjectMode,
                 stayAwake = stayAwake,
                 turnScreenOff = turnScreenOff,
+                newDisplay = newDisplay,
+                startApp = appStream,
                 logLevel = Shared.LogLevel.INFO,
             ).validate()
             val serverParams = options.toServerParams(scid)

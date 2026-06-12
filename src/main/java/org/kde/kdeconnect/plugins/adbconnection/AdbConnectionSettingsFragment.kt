@@ -28,5 +28,7 @@ class AdbConnectionSettingsFragment : PluginSettingsFragment() {
         findPreference<EditTextPreference>("scrcpy_max_size")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
         findPreference<EditTextPreference>("scrcpy_max_fps")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
         findPreference<EditTextPreference>("scrcpy_video_bit_rate")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
+        findPreference<EditTextPreference>("scrcpy_app_stream")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
+        findPreference<EditTextPreference>("scrcpy_new_display")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
     }
 }

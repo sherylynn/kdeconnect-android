@@ -109,6 +109,22 @@
             android:defaultValue="false"
             app:key="scrcpy_lock_on_disconnect" />
 
+        <EditTextPreference
+            android:key="scrcpy_app_stream"
+            android:title="应用流转"
+            android:summary="指定要流转的应用包名（留空=屏幕镜像）"
+            android:defaultValue=""
+            android:dialogTitle="输入应用包名"
+            app:key="scrcpy_app_stream" />
+
+        <EditTextPreference
+            android:key="scrcpy_new_display"
+            android:title="虚拟屏分辨率"
+            android:summary="格式: 宽x高 (如 1920x1080)，留空=默认"
+            android:defaultValue=""
+            android:dialogTitle="输入虚拟屏分辨率"
+            app:key="scrcpy_new_display" />
+
     </PreferenceCategory>
 
 </PreferenceScreen>

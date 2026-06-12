@@ -163,6 +163,7 @@ data class ClientOptions(
             control = control,
             displayId = displayId,
             newDisplay = newDisplay,
+            startApp = startApp,
             displayImePolicy = displayImePolicy,
             video = video,
             audio = audio,

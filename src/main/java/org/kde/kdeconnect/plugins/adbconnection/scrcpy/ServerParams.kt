@@ -32,6 +32,7 @@ data class ServerParams(
     val control: Boolean,
     val displayId: Int,
     val newDisplay: String,
+    val startApp: String,
     val displayImePolicy: DisplayImePolicy,
     val video: Boolean,
     val audio: Boolean,
@@ -117,6 +118,7 @@ data class ServerParams(
         if (!cleanUp) cmd.add("cleanup=false")
         if (!powerOn) cmd.add("power_on=false")
         if (newDisplay.isNotBlank()) { validate(newDisplay); cmd.add("new_display=${newDisplay.trim()}") }
+        if (startApp.isNotBlank()) { validate(startApp); cmd.add("start_app=${startApp.trim()}") }
         if (flexDisplay) cmd.add("flex_display=true")
         if (displayImePolicy != DisplayImePolicy.UNDEFINED) cmd.add("display_ime_policy=${displayImePolicy.string}")
         if (!vdDestroyContent) cmd.add("vd_destroy_content=false")
