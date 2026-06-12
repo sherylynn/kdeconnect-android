@@ -166,23 +166,24 @@ class ScrcpyFloatingService : Service() {
                 surfaceTexture = st
                 surface = Surface(st)
                 surfaceReady = true
+                // Ensure touch handler has correct dimensions
+                touchEventHandler?.updateDimensions(w, h)
                 startScrcpy()
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
                 touchEventHandler?.updateDimensions(w, h)
             }
             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                // KEY: return false to prevent SurfaceTexture release (like EasyControl)
                 return false
             }
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
 
-        // Forward touch events to remote device
-        tv.setOnTouchListener { _, event ->
+        // Forward touch events to remote device using normalized coordinates
+        tv.setOnTouchListener { view, event ->
             val handler = touchEventHandler ?: return@setOnTouchListener false
             if (!isRunning) return@setOnTouchListener false
-            val w = tv.width; val h = tv.height
+            val w = view.width; val h = view.height
             if (w <= 0 || h <= 0) return@setOnTouchListener false
             handler.updateDimensions(w, h)
             handler.handleMotionEvent(event)
@@ -263,12 +264,15 @@ class ScrcpyFloatingService : Service() {
                 handler.post { updateOverlaySize() }
 
                 val tv = textureView ?: return@Thread
+                // Create touch handler with session dimensions, update view dimensions later
                 handler.post {
+                    val tvW = tv.width
+                    val tvH = tv.height
                     touchEventHandler = TouchEventHandler(
                         sessionWidth = screenWidth.takeIf { it > 0 } ?: 1920,
                         sessionHeight = screenHeight.takeIf { it > 0 } ?: 1080,
-                        touchAreaWidth = tv.width,
-                        touchAreaHeight = tv.height,
+                        touchAreaWidth = if (tvW > 0) tvW else 400,
+                        touchAreaHeight = if (tvH > 0) tvH else 700,
                         onInjectTouch = { action, pointerId, x, y, pressure, actionButton, buttons ->
                             val sw = screenWidth.takeIf { it > 0 } ?: 1920
                             val sh = screenHeight.takeIf { it > 0 } ?: 1080
@@ -276,6 +280,10 @@ class ScrcpyFloatingService : Service() {
                         },
                         onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
                     )
+                    // Update with actual TextureView dimensions once available
+                    if (tvW > 0 && tvH > 0) {
+                        touchEventHandler?.updateDimensions(tvW, tvH)
+                    }
                 }
 
                 decodeVideo(session)
@@ -289,22 +297,28 @@ class ScrcpyFloatingService : Service() {
         while (isRunning) {
             val packet = session.readVideoPacket() ?: break
             val now = System.currentTimeMillis()
+            val gapMs = now - lastPacketTime
 
             if (packet.isSession) {
                 if (packet.width > 0 && packet.height > 0) {
                     val newW = packet.width; val newH = packet.height
                     val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
-                    val wasGapped = now - lastPacketTime > 2000
                     screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured || wasGapped) {
+                    if (sizeChanged || !decoderConfigured) {
                         handler.post { updateOverlaySize() }
                         createDecoder(newW, newH)
+                    } else if (gapMs > 1500 && decoderConfigured) {
+                        try { decoder?.flush() } catch (_: Exception) {}
                     }
                 }
                 lastPacketTime = now; continue
             }
 
+            if (gapMs > 1500 && decoderConfigured) {
+                try { decoder?.flush() } catch (_: Exception) {}
+            }
             lastPacketTime = now
+
             if (packet.data.isEmpty()) continue
             if (!decoderConfigured) {
                 if (screenWidth <= 0 || screenHeight <= 0) continue

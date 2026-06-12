@@ -458,17 +458,20 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         while (isRunning) {
             val packet = session.readVideoPacket() ?: break
             val now = System.currentTimeMillis()
+            val gapMs = now - lastPacketTime
 
             if (packet.isSession) {
                 if (packet.width > 0 && packet.height > 0) {
                     val newW = packet.width
                     val newH = packet.height
                     val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
-                    val wasGapped = now - lastPacketTime > 2000
                     screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured || wasGapped) {
-                        Log.i(TAG, "Recreating decoder: ${newW}x${newH} size=$sizeChanged gap=$wasGapped")
+                    if (sizeChanged || !decoderConfigured) {
+                        Log.i(TAG, "Recreating decoder: ${newW}x${newH}")
                         createDecoder(newW, newH)
+                    } else if (gapMs > 1500 && decoderConfigured) {
+                        Log.i(TAG, "Session after gap ${gapMs}ms, flushing decoder")
+                        try { decoder?.flush() } catch (_: Exception) {}
                     }
                     runOnUiThread {
                         surfaceView.setVideoDimensions(screenWidth, screenHeight)
@@ -480,7 +483,13 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 continue
             }
 
+            // Detect stream gap in non-session path (screen lock/unlock)
+            if (gapMs > 1500 && decoderConfigured) {
+                Log.i(TAG, "Stream gap ${gapMs}ms, flushing decoder")
+                try { decoder?.flush() } catch (_: Exception) {}
+            }
             lastPacketTime = now
+
             if (packet.data.isEmpty()) continue
             if (!decoderConfigured) {
                 if (screenWidth <= 0 || screenHeight <= 0) continue
