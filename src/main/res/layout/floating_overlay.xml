@@ -10,6 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <!-- Drag bar on top -->
     <FrameLayout
         android:id="@+id/floating_drag_bar"
         android:layout_width="match_parent"
@@ -24,14 +25,9 @@
             android:background="#66FFFFFF" />
     </FrameLayout>
 
-    <View
-        android:id="@+id/floating_resize"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_gravity="end|bottom"
-        android:background="#33FFFFFF" />
-
+    <!-- Control buttons at bottom -->
     <LinearLayout
+        android:id="@+id/floating_control_bar"
         android:layout_width="match_parent"
         android:layout_height="32dp"
         android:layout_gravity="bottom"
@@ -90,5 +86,14 @@
             android:src="@drawable/x_icon"
             android:tint="#ca5357" />
     </LinearLayout>
+
+    <!-- Resize handle: bottom-right, above control bar -->
+    <View
+        android:id="@+id/floating_resize"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_gravity="end|bottom"
+        android:layout_marginBottom="32dp"
+        android:background="#66FFFFFF" />
 
 </FrameLayout>
