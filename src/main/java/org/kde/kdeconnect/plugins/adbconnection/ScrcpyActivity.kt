@@ -527,16 +527,19 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             startActivity(intent)
             return
         }
-        val intent = Intent(this, ScrcpyFloatingActivity::class.java).apply {
-            putExtra(ScrcpyFloatingActivity.EXTRA_HOST, host)
-            putExtra(ScrcpyFloatingActivity.EXTRA_PORT, port)
-            putExtra(ScrcpyFloatingActivity.EXTRA_PREFS_NAME, prefsName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        // Start floating service
+        val serviceIntent = Intent(this, ScrcpyFloatingService::class.java).apply {
+            action = ScrcpyFloatingService.ACTION_START
+            putExtra(ScrcpyFloatingService.EXTRA_HOST, host)
+            putExtra(ScrcpyFloatingService.EXTRA_PORT, port)
+            putExtra(ScrcpyFloatingService.EXTRA_PREFS_NAME, prefsName)
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
+        else startService(serviceIntent)
+        // Stop current session
         isRunning = false
         releaseDecoder()
         scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
-        startActivity(intent)
         finish()
     }
 

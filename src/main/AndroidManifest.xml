@@ -504,6 +504,11 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
             android:excludeFromRecents="true"
             android:launchMode="singleInstance" />
 
+        <service
+            android:name="org.kde.kdeconnect.plugins.adbconnection.ScrcpyFloatingService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <activity
             android:name="org.kde.kdeconnect.plugins.portforward.PortForwardActivity"
             android:label="@string/port_forward_title"

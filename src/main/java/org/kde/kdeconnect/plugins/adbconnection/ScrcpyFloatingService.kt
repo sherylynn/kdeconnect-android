@@ -1,0 +1,356 @@
+package org.kde.kdeconnect.plugins.adbconnection
+
+import android.annotation.SuppressLint
+import android.app.Service
+import android.content.Intent
+import android.graphics.PixelFormat
+import android.media.MediaCodec
+import android.media.MediaFormat
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.util.Log
+import android.view.*
+import android.widget.EditText
+import android.widget.GridLayout
+import android.widget.ImageView
+import android.widget.LinearLayout
+import org.kde.kdeconnect_tp.R
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.TouchEventHandler
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+
+class ScrcpyFloatingService : Service() {
+
+    companion object {
+        private const val TAG = "ScrcpyFloatingSvc"
+        const val ACTION_START = "org.kde.kdeconnect.floating.START"
+        const val ACTION_STOP = "org.kde.kdeconnect.floating.STOP"
+        const val EXTRA_HOST = "host"
+        const val EXTRA_PORT = "port"
+        const val EXTRA_PREFS_NAME = "prefs_name"
+    }
+
+    private var windowManager: WindowManager? = null
+    private var overlayView: View? = null
+    private var textureView: TextureView? = null
+    private var scrcpySession: ScrcpySession? = null
+    private var decoder: MediaCodec? = null
+    private var surface: Surface? = null
+    private var isRunning = false
+    private var screenWidth = 0
+    private var screenHeight = 0
+    private var decoderConfigured = false
+    private val codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
+    private val inputBufferQueue = LinkedBlockingQueue<Int>()
+    private val handler = Handler(Looper.getMainLooper())
+    private var touchEventHandler: TouchEventHandler? = null
+
+    private lateinit var layoutParams: WindowManager.LayoutParams
+
+    private var host = ""
+    private var port = 0
+    private var prefsName = ""
+
+    private val decoderCallback = object : MediaCodec.Callback() {
+        override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
+            inputBufferQueue.offer(index)
+        }
+        override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+            try { codec.releaseOutputBuffer(index, true) } catch (_: Exception) {}
+        }
+        override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+            Log.e(TAG, "Decoder error", e)
+        }
+        override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+            val w = if (format.containsKey("crop-right") && format.containsKey("crop-left"))
+                format.getInteger("crop-right") - format.getInteger("crop-left") + 1
+            else format.getInteger(MediaFormat.KEY_WIDTH)
+            val h = if (format.containsKey("crop-bottom") && format.containsKey("crop-top"))
+                format.getInteger("crop-bottom") - format.getInteger("crop-top") + 1
+            else format.getInteger(MediaFormat.KEY_HEIGHT)
+            if (w > 0 && h > 0) {
+                screenWidth = w; screenHeight = h
+                handler.post { updateOverlaySize() }
+            }
+        }
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_START -> {
+                host = intent.getStringExtra(EXTRA_HOST) ?: ""
+                port = intent.getIntExtra(EXTRA_PORT, 0)
+                prefsName = intent.getStringExtra(EXTRA_PREFS_NAME) ?: ""
+                if (host.isEmpty() || port == 0) { stopSelf(); return START_NOT_STICKY }
+                showOverlay()
+                startScrcpy()
+            }
+            ACTION_STOP -> {
+                stopScrcpy()
+                hideOverlay()
+                stopSelf()
+            }
+        }
+        return START_NOT_STICKY
+    }
+
+    @SuppressLint("InflateParams")
+    private fun showOverlay() {
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+        val inflater = LayoutInflater.from(this)
+        overlayView = inflater.inflate(R.layout.floating_overlay, null)
+        textureView = overlayView!!.findViewById(R.id.floating_texture)
+
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+
+        layoutParams = WindowManager.LayoutParams(
+            400, 700,
+            type,
+            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 50
+            y = 200
+        }
+
+        setupDragBar()
+        setupControlBar()
+        setupTouchForwarding()
+
+        windowManager!!.addView(overlayView, layoutParams)
+    }
+
+    private fun hideOverlay() {
+        try {
+            if (overlayView != null) windowManager?.removeView(overlayView)
+        } catch (_: Exception) {}
+        overlayView = null
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupDragBar() {
+        val bar = overlayView!!.findViewById<View>(R.id.floating_drag_bar) ?: return
+        var lastX = 0; var lastY = 0
+        var initialX = 0; var initialY = 0
+        var isDragging = false
+
+        bar.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = layoutParams.x
+                    initialY = layoutParams.y
+                    lastX = event.rawX.toInt()
+                    lastY = event.rawY.toInt()
+                    isDragging = false
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX.toInt() - lastX
+                    val dy = event.rawY.toInt() - lastY
+                    if (!isDragging && (dx * dx + dy * dy > 625)) isDragging = true
+                    if (isDragging) {
+                        layoutParams.x = initialX + dx
+                        layoutParams.y = initialY + dy
+                        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> true
+                else -> false
+            }
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupTouchForwarding() {
+        val tv = textureView ?: return
+        val surfaceSize = intArrayOf(0, 0)
+
+        tv.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
+                surface = Surface(st)
+                surfaceSize[0] = w; surfaceSize[1] = h
+                startScrcpy()
+            }
+            override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture, w: Int, h: Int) {
+                surfaceSize[0] = w; surfaceSize[1] = h
+                touchEventHandler?.updateDimensions(w, h)
+            }
+            override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean { return false }
+            override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
+        }
+
+        tv.setOnTouchListener { _, event ->
+            val handler = touchEventHandler ?: return@setOnTouchListener false
+            if (!isRunning || surfaceSize[0] <= 0 || surfaceSize[1] <= 0) return@setOnTouchListener false
+            handler.updateDimensions(surfaceSize[0], surfaceSize[1])
+            handler.handleMotionEvent(event)
+            true
+        }
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun setupControlBar() {
+        val session = { scrcpySession }
+
+        overlayView!!.findViewById<ImageView>(R.id.floating_btn_back)?.setOnClickListener {
+            session()?.sendBack()
+        }
+        overlayView!!.findViewById<ImageView>(R.id.floating_btn_home)?.setOnClickListener {
+            session()?.sendHome()
+        }
+        overlayView!!.findViewById<ImageView>(R.id.floating_btn_switch)?.setOnClickListener {
+            session()?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
+            session()?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
+        }
+        overlayView!!.findViewById<ImageView>(R.id.floating_btn_close)?.setOnClickListener {
+            stopScrcpy()
+            hideOverlay()
+            stopSelf()
+        }
+    }
+
+    private fun updateOverlaySize() {
+        if (screenWidth <= 0 || screenHeight <= 0) return
+        val maxW = 400
+        val ratio = screenHeight.toFloat() / screenWidth.toFloat()
+        val w = maxW
+        val h = (maxW * ratio).toInt()
+        layoutParams.width = w
+        layoutParams.height = h
+        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+    }
+
+    private fun startScrcpy() {
+        if (isRunning) return
+        Thread {
+            try {
+                val session = ScrcpySession(host, port, this, prefsName)
+                if (!session.start()) { stopSelf(); return@Thread }
+                scrcpySession = session
+                screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0
+                screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
+                handler.post { updateOverlaySize() }
+
+                val tv = textureView ?: return@Thread
+                val tvW = tv.width; val tvH = tv.height
+                touchEventHandler = TouchEventHandler(
+                    sessionWidth = screenWidth.takeIf { it > 0 } ?: 1920,
+                    sessionHeight = screenHeight.takeIf { it > 0 } ?: 1080,
+                    touchAreaWidth = tvW,
+                    touchAreaHeight = tvH,
+                    onInjectTouch = { action, pointerId, x, y, pressure, actionButton, buttons ->
+                        val sw = screenWidth.takeIf { it > 0 } ?: 1920
+                        val sh = screenHeight.takeIf { it > 0 } ?: 1080
+                        session.sendTouchEvent(action, pointerId, x, y, sw, sh, pressure, actionButton, buttons)
+                    },
+                    onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
+                )
+
+                decodeVideo(session)
+            } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); stopSelf() }
+        }.start()
+    }
+
+    private fun decodeVideo(session: ScrcpySession) {
+        isRunning = true
+        var lastPacketTime = System.currentTimeMillis()
+        var waitingForKeyFrame = false
+        while (isRunning) {
+            val packet = session.readVideoPacket() ?: break
+            val now = System.currentTimeMillis()
+            val gapMs = now - lastPacketTime
+
+            if (packet.isSession) {
+                if (packet.width > 0 && packet.height > 0) {
+                    val newW = packet.width; val newH = packet.height
+                    val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
+                    screenWidth = newW; screenHeight = newH
+                    if (sizeChanged || !decoderConfigured) {
+                        handler.post { updateOverlaySize() }
+                        createDecoder(newW, newH)
+                        waitingForKeyFrame = true
+                    }
+                }
+                lastPacketTime = now
+                continue
+            }
+
+            if (gapMs > 200 && decoderConfigured) {
+                createDecoder(screenWidth, screenHeight)
+                waitingForKeyFrame = true
+            }
+            lastPacketTime = now
+
+            if (packet.data.isEmpty()) continue
+            if (!decoderConfigured) {
+                if (screenWidth <= 0 || screenHeight <= 0) continue
+                createDecoder(screenWidth, screenHeight)
+                waitingForKeyFrame = true
+            }
+            if (waitingForKeyFrame && !packet.isKeyFrame && !packet.isConfig) continue
+            if (packet.isKeyFrame) waitingForKeyFrame = false
+            feedPacket(packet.data, packet.ptsUs, packet.isConfig, packet.isKeyFrame)
+        }
+    }
+
+    private fun createDecoder(width: Int, height: Int) {
+        releaseDecoder()
+        try {
+            val fmt = MediaFormat.createVideoFormat(codecMime, width, height)
+            decoder = MediaCodec.createDecoderByType(codecMime)
+            decoder!!.setCallback(decoderCallback, handler)
+            decoder!!.configure(fmt, surface, null, 0)
+            decoder!!.start()
+            decoderConfigured = true
+        } catch (e: Exception) { Log.e(TAG, "Decoder create failed", e); decoderConfigured = false }
+    }
+
+    private fun releaseDecoder() {
+        inputBufferQueue.clear()
+        try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
+        decoder = null; decoderConfigured = false
+    }
+
+    private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {
+        val d = decoder ?: return
+        try {
+            var inputIndex = inputBufferQueue.poll()
+            if (inputIndex == null && (isConfig || isKeyFrame)) {
+                inputIndex = inputBufferQueue.poll(50, TimeUnit.MILLISECONDS)
+            }
+            if (inputIndex != null) {
+                val buf = d.getInputBuffer(inputIndex) ?: return
+                buf.clear(); buf.put(data)
+                var flags = 0
+                if (isKeyFrame) flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
+                if (isConfig) flags = flags or MediaCodec.BUFFER_FLAG_CODEC_CONFIG
+                d.queueInputBuffer(inputIndex, 0, data.size, ptsUs, flags)
+            }
+        } catch (e: Exception) { Log.e(TAG, "Feed error", e) }
+    }
+
+    private fun stopScrcpy() {
+        isRunning = false
+        releaseDecoder()
+        scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
+    }
+
+    override fun onDestroy() {
+        stopScrcpy()
+        hideOverlay()
+        super.onDestroy()
+    }
+}

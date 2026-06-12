@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#DD1A1A1E"
+    android:elevation="8dp">
+
+    <!-- Drag bar -->
+    <FrameLayout
+        android:id="@+id/floating_drag_bar"
+        android:layout_width="match_parent"
+        android:layout_height="28dp"
+        android:padding="4dp">
+
+        <View
+            android:layout_width="60dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center"
+            android:background="#66FFFFFF" />
+    </FrameLayout>
+
+    <!-- Video surface -->
+    <TextureView
+        android:id="@+id/floating_texture"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- Control buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="32dp"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:paddingHorizontal="4dp">
+
+        <ImageView
+            android:id="@+id/floating_btn_back"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:focusable="false"
+            android:padding="4dp"
+            android:src="@drawable/caret_left"
+            android:tint="#DEDEDE" />
+
+        <ImageView
+            android:id="@+id/floating_btn_home"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:focusable="false"
+            android:padding="4dp"
+            android:src="@drawable/o"
+            android:tint="#DEDEDE" />
+
+        <ImageView
+            android:id="@+id/floating_btn_switch"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:focusable="false"
+            android:padding="4dp"
+            android:src="@drawable/square"
+            android:tint="#DEDEDE" />
+
+        <ImageView
+            android:id="@+id/floating_btn_close"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:focusable="false"
+            android:padding="4dp"
+            android:src="@drawable/x_icon"
+            android:tint="#ca5357" />
+    </LinearLayout>
+
+</LinearLayout>
