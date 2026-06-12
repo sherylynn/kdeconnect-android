@@ -282,37 +282,86 @@ class ScrcpyFloatingService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun setupResizeHandles() {
         val minSize = 150
+        val cornerSize = 40 // px — corner detection zone
 
-        // Bottom-right: anchor = top-left corner
+        // Bottom handles via views (existing)
         setupCornerResize(R.id.resize_br, minSize) { ax, ay, rawX, rawY ->
             layoutParams.width = (rawX - ax).coerceAtLeast(minSize)
             layoutParams.height = (rawY - ay).coerceAtLeast(minSize)
         }
-
-        // Top-left: anchor = bottom-right corner
-        setupCornerResize(R.id.resize_tl, minSize) { ax, ay, rawX, rawY ->
-            val newW = (ax - rawX).coerceAtLeast(minSize)
-            val newH = (ay - rawY).coerceAtLeast(minSize)
-            layoutParams.x = ax - newW
-            layoutParams.y = ay - newH
-            layoutParams.width = newW
-            layoutParams.height = newH
-        }
-
-        // Top-right: anchor = bottom-left corner
-        setupCornerResize(R.id.resize_tr, minSize) { ax, ay, rawX, rawY ->
-            val newH = (ay - rawY).coerceAtLeast(minSize)
-            layoutParams.width = (rawX - ax).coerceAtLeast(minSize)
-            layoutParams.y = ay - newH
-            layoutParams.height = newH
-        }
-
-        // Bottom-left: anchor = top-right corner
         setupCornerResize(R.id.resize_bl, minSize) { ax, ay, rawX, rawY ->
             val newW = (ax - rawX).coerceAtLeast(minSize)
             layoutParams.x = ax - newW
             layoutParams.width = newW
             layoutParams.height = (rawY - ay).coerceAtLeast(minSize)
+        }
+
+        // Top corners via overlay touch listener
+        overlayView?.setOnTouchListener { _, event ->
+            if (!isRunning) return@setOnTouchListener false
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    val rx = event.x.toInt()
+                    val ry = event.y.toInt()
+                    val w = layoutParams.width
+                    val h = layoutParams.height
+                    // Top-left corner zone
+                    if (rx < cornerSize && ry < cornerSize) {
+                        // Anchor = bottom-right absolute
+                        val loc = IntArray(2)
+                        overlayView?.getLocationOnScreen(loc)
+                        overlayView?.tag = floatArrayOf(
+                            (loc[0] + w).toFloat(), (loc[1] + h).toFloat(),
+                            1f // flag: top-left
+                        )
+                        true
+                    }
+                    // Top-right corner zone
+                    else if (rx > w - cornerSize && ry < cornerSize) {
+                        val loc = IntArray(2)
+                        overlayView?.getLocationOnScreen(loc)
+                        overlayView?.tag = floatArrayOf(
+                            loc[0].toFloat(), (loc[1] + h).toFloat(),
+                            2f // flag: top-right
+                        )
+                        true
+                    }
+                    else false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val tag = overlayView?.tag as? FloatArray ?: return@setOnTouchListener false
+                    val flag = tag[2]
+                    val anchorX = tag[0].toInt()
+                    val anchorY = tag[1].toInt()
+                    val rawX = event.rawX.toInt()
+                    val rawY = event.rawY.toInt()
+                    when (flag) {
+                        1f -> { // top-left
+                            val newW = (anchorX - rawX).coerceAtLeast(minSize)
+                            val newH = (anchorY - rawY).coerceAtLeast(minSize)
+                            layoutParams.x = anchorX - newW
+                            layoutParams.y = anchorY - newH
+                            layoutParams.width = newW
+                            layoutParams.height = newH
+                        }
+                        2f -> { // top-right
+                            val newH = (anchorY - rawY).coerceAtLeast(minSize)
+                            layoutParams.width = (rawX - anchorX).coerceAtLeast(minSize)
+                            layoutParams.y = anchorY - newH
+                            layoutParams.height = newH
+                        }
+                    }
+                    mainHandler.post {
+                        try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    overlayView?.tag = null
+                    false // let other views handle it
+                }
+                else -> false
+            }
         }
     }
 
@@ -330,8 +379,6 @@ class ScrcpyFloatingService : Service() {
                 val anchorY: Int
                 when (viewId) {
                     R.id.resize_br -> { anchorX = ovX; anchorY = ovY }
-                    R.id.resize_tl -> { anchorX = ovX + layoutParams.width; anchorY = ovY + layoutParams.height }
-                    R.id.resize_tr -> { anchorX = ovX; anchorY = ovY + layoutParams.height }
                     R.id.resize_bl -> { anchorX = ovX + layoutParams.width; anchorY = ovY }
                     else -> { anchorX = ovX; anchorY = ovY }
                 }
