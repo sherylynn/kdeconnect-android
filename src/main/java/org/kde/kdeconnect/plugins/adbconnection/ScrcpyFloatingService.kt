@@ -171,6 +171,15 @@ class ScrcpyFloatingService : Service() {
                 startScrcpy()
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                // Update surface buffer size and recreate decoder for new dimensions
+                if (w > 0 && h > 0) {
+                    st.setDefaultBufferSize(w, h)
+                    if (decoderConfigured) {
+                        mainHandler.post {
+                            createDecoder(screenWidth, screenHeight)
+                        }
+                    }
+                }
             }
             override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
                 return false
