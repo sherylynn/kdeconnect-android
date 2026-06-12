@@ -90,8 +90,7 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             floatingMenu.visibility = View.GONE
         }
         floatingMenu.findViewById<Button>(R.id.floating_power).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+            scrcpySession?.lockDevice()
             floatingMenu.visibility = View.GONE
         }
         floatingMenu.findViewById<Button>(R.id.floating_volume_up).setOnClickListener {
@@ -286,16 +285,14 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             scrcpySession?.setDisplayPower(false)
             resetBarViewTimer()
         }
-        // Power
+        // Power - KEYCODE_POWER shows power menu
         findViewById<ImageView>(R.id.button_power).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+            scrcpySession?.sendKeyClick(KeyEvent.KEYCODE_POWER)
             resetBarViewTimer()
         }
-        // Lock
+        // Lock - KEYCODE_SLEEP locks the screen
         findViewById<ImageView>(R.id.button_lock).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+            scrcpySession?.lockDevice()
             resetBarViewTimer()
         }
     }

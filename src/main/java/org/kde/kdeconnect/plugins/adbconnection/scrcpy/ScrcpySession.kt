@@ -374,8 +374,39 @@ class ScrcpySession(
         }
     }
 
-    fun sendBack() { sendKeyEvent(1, 4); sendKeyEvent(0, 4) }
-    fun sendHome() { sendKeyEvent(1, 3); sendKeyEvent(0, 3) }
+    fun sendBack() { sendKeyClick(4) }
+    fun sendHome() { sendKeyClick(3) }
+
+    internal fun sendKeyClick(keycode: Int) {
+        val output = controlOutput ?: return
+        try {
+            val buf = java.io.ByteArrayOutputStream(28)
+            val dos = java.io.DataOutputStream(buf)
+            dos.writeByte(TYPE_INJECT_KEYCODE)
+            dos.writeByte(0) // ACTION_DOWN
+            dos.writeInt(keycode)
+            dos.writeInt(0)
+            dos.writeInt(0)
+            dos.writeByte(TYPE_INJECT_KEYCODE)
+            dos.writeByte(1) // ACTION_UP
+            dos.writeInt(keycode)
+            dos.writeInt(0)
+            dos.writeInt(0)
+            dos.flush()
+            Thread {
+                try {
+                    synchronized(output) {
+                        output.write(buf.toByteArray())
+                        output.flush()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "sendKeyClick write failed", e)
+                }
+            }.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "sendKeyClick($keycode) failed", e)
+        }
+    }
 
     fun setDisplayPower(on: Boolean) {
         val output = controlOutput ?: return
@@ -392,9 +423,8 @@ class ScrcpySession(
     }
 
     fun lockDevice() {
-        // Send power key event to lock the device
-        sendKeyEvent(1, KeyEvent.KEYCODE_POWER)
-        sendKeyEvent(0, KeyEvent.KEYCODE_POWER)
+        // Use KEYCODE_SLEEP (223) to lock screen, not KEYCODE_POWER which triggers long-press menu
+        sendKeyClick(223)
     }
 
     fun sendText(text: String) {
