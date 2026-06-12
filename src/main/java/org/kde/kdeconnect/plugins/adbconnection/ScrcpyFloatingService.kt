@@ -279,33 +279,31 @@ class ScrcpyFloatingService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun setupResizeHandle() {
         val resize = overlayView?.findViewById<View>(R.id.floating_resize) ?: return
-        val minSize = 150
+        val minSize = 200
+        var startX = 0; var startY = 0
+        var startW = 0; var startH = 0
 
         resize.setOnTouchListener { _, event ->
-            // Always consume like EasyControl
             when (event.action) {
-                MotionEvent.ACTION_MOVE -> {
-                    if (screenWidth <= 0 || screenHeight <= 0) return@setOnTouchListener true
-                    // New size = touch position to overlay top-left (like EasyControl)
-                    val newX = event.rawX.toInt() - layoutParams.x
-                    val newY = event.rawY.toInt() - layoutParams.y
-                    if (newX < minSize || newY < minSize) return@setOnTouchListener true
-
-                    // Calculate size maintaining video aspect ratio
-                    val videoRatio = screenWidth.toFloat() / screenHeight.toFloat()
-                    val w: Int
-                    val h: Int
-                    if (newX.toFloat() / newY > videoRatio) {
-                        h = newY; w = (h * videoRatio).toInt()
-                    } else {
-                        w = newX; h = (w / videoRatio).toInt()
-                    }
-                    // Update overlay window size — TextureView is match_parent so it follows
-                    layoutParams.width = w; layoutParams.height = h
-                    try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                MotionEvent.ACTION_DOWN -> {
+                    startX = event.rawX.toInt()
+                    startY = event.rawY.toInt()
+                    startW = layoutParams.width
+                    startH = layoutParams.height
+                    true
                 }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX.toInt() - startX
+                    val dy = event.rawY.toInt() - startY
+                    val newW = (startW + dx).coerceAtLeast(minSize)
+                    val newH = (startH + dy).coerceAtLeast(minSize)
+                    layoutParams.width = newW
+                    layoutParams.height = newH
+                    try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    true
+                }
+                else -> false
             }
-            true // Always consume (like EasyControl)
         }
     }
 
