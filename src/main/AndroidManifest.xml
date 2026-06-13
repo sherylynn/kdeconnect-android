@@ -485,6 +485,16 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
             android:exported="false" />
 
         <activity
+            android:name="org.kde.kdeconnect.plugins.adbconnection.AdbInstallActivity"
+            android:label="@string/install_apk_title"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="org.kde.kdeconnect.plugins.adbconnection.INSTALL_APK" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
             android:name="org.kde.kdeconnect.plugins.adbconnection.ScrcpyActivity"
             android:label="@string/scrcpy_connecting"
             android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"

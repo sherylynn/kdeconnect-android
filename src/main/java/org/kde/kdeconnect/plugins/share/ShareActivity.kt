@@ -8,8 +8,10 @@ package org.kde.kdeconnect.plugins.share
 
 import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
 import android.webkit.URLUtil
@@ -23,6 +25,7 @@ import org.kde.kdeconnect.BackgroundService
 import org.kde.kdeconnect.Device
 import org.kde.kdeconnect.KdeConnect
 import org.kde.kdeconnect.base.BaseActivity
+import org.kde.kdeconnect.plugins.adbconnection.AdbInstallActivity
 import org.kde.kdeconnect.ui.compose.KdeTheme
 import org.kde.kdeconnect.ui.compose.extensions.device.toUiModel
 import org.kde.kdeconnect.ui.compose.model.device.DeviceUiModel
@@ -91,7 +94,29 @@ class ShareActivity : BaseActivity<ActivityShareBinding>() {
                 deviceId = device.deviceId,
                 pluginClass = SharePlugin::class.java
             )
-        if (intentHasUrl && !device.isReachable) {
+
+        val isApk = intent.type == APK_MIME_TYPE && (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE)
+
+        if (isApk) {
+            val apkUri: Uri? = if (intent.action == Intent.ACTION_SEND) {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            } else {
+                (intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM))?.firstOrNull()
+            }
+
+            if (apkUri != null) {
+                val installIntent = Intent(this, AdbInstallActivity::class.java).apply {
+                    action = AdbInstallActivity.ACTION_INSTALL_APK
+                    putExtra(AdbInstallActivity.EXTRA_APK_URI, apkUri)
+                    putExtra(AdbInstallActivity.EXTRA_DEVICE_ID, device.deviceId)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(installIntent)
+            } else {
+                Toast.makeText(this, "Failed to get APK URI for installation.", Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Failed to get APK URI for installation.")
+            }
+        } else if (intentHasUrl && !device.isReachable) {
             // Store the URL to be delivered once device becomes online
             storeUrlForFutureDelivery(
                 device = device,
@@ -174,12 +199,34 @@ class ShareActivity : BaseActivity<ActivityShareBinding>() {
         if (deviceId != null) {
             val plugin: SharePlugin? =
                 KdeConnect.getInstance().getDevicePlugin(deviceId, SharePlugin::class.java)
-            if (plugin != null) {
+            val device = KdeConnect.getInstance().getDevice(id = deviceId)
+
+            val isApk = intent.type == APK_MIME_TYPE && (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE)
+
+            if (isApk && device != null) {
+                val apkUri: Uri? = if (intent.action == Intent.ACTION_SEND) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                } else {
+                    (intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM))?.firstOrNull()
+                }
+
+                if (apkUri != null) {
+                    val installIntent = Intent(this, AdbInstallActivity::class.java).apply {
+                        action = AdbInstallActivity.ACTION_INSTALL_APK
+                        putExtra(AdbInstallActivity.EXTRA_APK_URI, apkUri)
+                        putExtra(AdbInstallActivity.EXTRA_DEVICE_ID, device.deviceId)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(installIntent)
+                } else {
+                    Toast.makeText(this, "Failed to get APK URI for installation.", Toast.LENGTH_LONG).show()
+                    Log.e(TAG, "Failed to get APK URI for installation.")
+                }
+            } else if (plugin != null) {
                 plugin.share(intent)
             } else {
                 val extras = intent.extras
                 if (extras != null && extras.containsKey(Intent.EXTRA_TEXT)) {
-                    val device = KdeConnect.getInstance().getDevice(id = deviceId)
                     if (doesIntentContainUrl(intent) && device != null && !device.isReachable) {
                         val text = extras.getString(Intent.EXTRA_TEXT)
                         storeUrlForFutureDelivery(
@@ -206,5 +253,7 @@ class ShareActivity : BaseActivity<ActivityShareBinding>() {
 
     companion object {
         private const val KEY_UNREACHABLE_URL_LIST = "key_unreachable_url_list"
+        private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
+        private const val TAG = "ShareActivity"
     }
 }
