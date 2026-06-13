@@ -289,6 +289,9 @@ class ScrcpySession(
             val isSession = (header[0].toInt() and sessionFlagByte) != 0
 
             if (isSession) {
+                // Session packet format: [flags:4][width:4][height:4] (big-endian)
+                // flags highest bit=1, lowest bit=clientResized
+                val clientResized = (header[3].toInt() and 1) != 0
                 val sw = ((header[4].toInt() and 0xFF) shl 24) or
                         ((header[5].toInt() and 0xFF) shl 16) or
                         ((header[6].toInt() and 0xFF) shl 8) or
@@ -297,7 +300,7 @@ class ScrcpySession(
                         ((header[9].toInt() and 0xFF) shl 16) or
                         ((header[10].toInt() and 0xFF) shl 8) or
                         (header[11].toInt() and 0xFF)
-                Log.i(TAG, "Session packet: ${sw}x${sh}")
+                Log.i(TAG, "Session packet: ${sw}x${sh} clientResized=$clientResized")
                 screenWidth = sw
                 screenHeight = sh
                 return VideoPacket(

@@ -8,8 +8,6 @@ import android.app.Service
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
-import android.media.MediaCodec
-import android.media.MediaFormat
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -21,6 +19,7 @@ import android.view.*
 import android.widget.ImageView
 import org.kde.kdeconnect_tp.R
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.VideoDecode
 
 class ScrcpyFloatingService : Service() {
 
@@ -41,16 +40,22 @@ class ScrcpyFloatingService : Service() {
     private var surfaceTexture: SurfaceTexture? = null
     private var surface: Surface? = null
     private var scrcpySession: ScrcpySession? = null
-    private var decoder: MediaCodec? = null
-    private var isRunning = false
+
+    // Decoder - like Easycontrol
+    private var handlerThread: HandlerThread? = null
+    private var handler: Handler? = null
+    private var videoDecode: VideoDecode? = null
+
+    // Status management - like Easycontrol Client
+    private var status = 0 // 0: initial, 1: running, -1: stopped
+    private var videoDecodeThread: Thread? = null
+    private var keepAliveThread: Thread? = null
+    private var lastKeepAliveTime = 0L
+    private val timeoutDelay = 5000L
+
     private var screenWidth = 0
     private var screenHeight = 0
-    private var decoderConfigured = false
-    private val codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
-    private val inputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var codecHandler: Handler? = null
-    private var codecHandlerThread: HandlerThread? = null
     private var surfaceReady = false
     private val pointerDownTimes = LongArray(10)
 
@@ -58,30 +63,6 @@ class ScrcpyFloatingService : Service() {
     private var host = ""
     private var port = 0
     private var prefsName = ""
-
-    private val decoderCallback = object : MediaCodec.Callback() {
-        override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
-            inputBufferQueue.offer(index)
-        }
-        override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
-            try { codec.releaseOutputBuffer(index, true) } catch (_: Exception) {}
-        }
-        override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
-            Log.e(TAG, "Decoder error", e)
-        }
-        override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
-            val w = if (format.containsKey("crop-right") && format.containsKey("crop-left"))
-                format.getInteger("crop-right") - format.getInteger("crop-left") + 1
-            else format.getInteger(MediaFormat.KEY_WIDTH)
-            val h = if (format.containsKey("crop-bottom") && format.containsKey("crop-top"))
-                format.getInteger("crop-bottom") - format.getInteger("crop-top") + 1
-            else format.getInteger(MediaFormat.KEY_HEIGHT)
-            if (w > 0 && h > 0) {
-                screenWidth = w; screenHeight = h
-                mainHandler.post { updateOverlaySize() }
-            }
-        }
-    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -96,7 +77,7 @@ class ScrcpyFloatingService : Service() {
                 showOverlay()
             }
             ACTION_STOP -> {
-                stopScrcpy()
+                release()
                 hideOverlay()
                 stopSelf()
             }
@@ -127,7 +108,6 @@ class ScrcpyFloatingService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         else @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
 
-        // Calculate initial size based on screen (like EasyControl: shortEdge * 4/5)
         val dm = resources.displayMetrics
         val screenW = dm.widthPixels
         val screenH = dm.heightPixels
@@ -171,21 +151,17 @@ class ScrcpyFloatingService : Service() {
                 startScrcpy()
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                // Keep buffer at remote device resolution — decoder must not be interrupted
                 if (screenWidth > 0 && screenHeight > 0) {
                     st.setDefaultBufferSize(screenWidth, screenHeight)
                 }
             }
-            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
-                return false
-            }
+            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean = false
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
 
-        // Forward touch events to remote device — like EasyControl's ClientView
         tv.setOnTouchListener { view, event ->
             val session = scrcpySession ?: return@setOnTouchListener false
-            if (!isRunning) return@setOnTouchListener false
+            if (status != 1) return@setOnTouchListener false
             val w = view.width; val h = view.height
             if (w <= 0 || h <= 0) return@setOnTouchListener false
 
@@ -208,7 +184,6 @@ class ScrcpyFloatingService : Service() {
                 val offsetTime = (event.eventTime - pointerDownTimes[i.coerceIn(0, 9)]).toInt()
                 var x = event.getX(i) / w
                 var y = event.getY(i) / h
-                // Clamp to 0-1 like EasyControl
                 if (x < 0f || x > 1f || y < 0f || y > 1f) {
                     x = x.coerceIn(0f, 1f)
                     y = y.coerceIn(0f, 1f)
@@ -264,7 +239,6 @@ class ScrcpyFloatingService : Service() {
             scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
         }
         overlayView?.findViewById<ImageView>(R.id.floating_btn_fullscreen)?.setOnClickListener {
-            // Switch back to full screen activity
             val intent = Intent(this, ScrcpyActivity::class.java).apply {
                 putExtra(ScrcpyActivity.EXTRA_HOST, host)
                 putExtra(ScrcpyActivity.EXTRA_PORT, port)
@@ -272,10 +246,10 @@ class ScrcpyFloatingService : Service() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
-            stopScrcpy(); hideOverlay(); stopSelf()
+            release(); hideOverlay(); stopSelf()
         }
         overlayView?.findViewById<ImageView>(R.id.floating_btn_close)?.setOnClickListener {
-            stopScrcpy(); hideOverlay(); stopSelf()
+            release(); hideOverlay(); stopSelf()
         }
     }
 
@@ -290,29 +264,20 @@ class ScrcpyFloatingService : Service() {
 
     private fun setupCornerResize(viewId: Int, minSize: Int) {
         val view = overlayView?.findViewById<View>(viewId) ?: return
-
-        var initialX = 0
-        var initialY = 0
-        var initialW = 0
-        var initialH = 0
-        var initialRawX = 0f
-        var initialRawY = 0f
+        var initialX = 0; var initialY = 0; var initialW = 0; var initialH = 0
+        var initialRawX = 0f; var initialRawY = 0f
 
         view.setOnTouchListener { _, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialX = layoutParams.x
-                    initialY = layoutParams.y
-                    initialW = layoutParams.width
-                    initialH = layoutParams.height
-                    initialRawX = event.rawX
-                    initialRawY = event.rawY
+                    initialX = layoutParams.x; initialY = layoutParams.y
+                    initialW = layoutParams.width; initialH = layoutParams.height
+                    initialRawX = event.rawX; initialRawY = event.rawY
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val deltaX = event.rawX - initialRawX
                     val deltaY = event.rawY - initialRawY
-
                     when (viewId) {
                         R.id.resize_br -> {
                             layoutParams.width = (initialW + deltaX).toInt().coerceAtLeast(minSize)
@@ -320,34 +285,21 @@ class ScrcpyFloatingService : Service() {
                         }
                         R.id.resize_bl -> {
                             val newW = (initialW - deltaX).toInt()
-                            if (newW >= minSize) {
-                                layoutParams.x = (initialX + deltaX).toInt()
-                                layoutParams.width = newW
-                            }
+                            if (newW >= minSize) { layoutParams.x = (initialX + deltaX).toInt(); layoutParams.width = newW }
                             layoutParams.height = (initialH + deltaY).toInt().coerceAtLeast(minSize)
                         }
                         R.id.resize_tr -> {
                             layoutParams.width = (initialW + deltaX).toInt().coerceAtLeast(minSize)
                             val newH = (initialH - deltaY).toInt()
-                            if (newH >= minSize) {
-                                layoutParams.y = (initialY + deltaY).toInt()
-                                layoutParams.height = newH
-                            }
+                            if (newH >= minSize) { layoutParams.y = (initialY + deltaY).toInt(); layoutParams.height = newH }
                         }
                         R.id.resize_tl -> {
                             val newW = (initialW - deltaX).toInt()
-                            if (newW >= minSize) {
-                                layoutParams.x = (initialX + deltaX).toInt()
-                                layoutParams.width = newW
-                            }
+                            if (newW >= minSize) { layoutParams.x = (initialX + deltaX).toInt(); layoutParams.width = newW }
                             val newH = (initialH - deltaY).toInt()
-                            if (newH >= minSize) {
-                                layoutParams.y = (initialY + deltaY).toInt()
-                                layoutParams.height = newH
-                            }
+                            if (newH >= minSize) { layoutParams.y = (initialY + deltaY).toInt(); layoutParams.height = newH }
                         }
                     }
-
                     try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
                     true
                 }
@@ -364,15 +316,11 @@ class ScrcpyFloatingService : Service() {
         val shortEdge = minOf(screenW, screenH)
         val maxW = shortEdge * 4 / 5
         val videoRatio = screenHeight.toFloat() / screenWidth.toFloat()
-        val w: Int
-        val h: Int
-        // Fit within screen while maintaining video aspect ratio
+        val w: Int; val h: Int
         if (videoRatio > 1f) {
-            // Portrait video: limit by height
             h = minOf(maxW, (screenH * 4 / 5))
             w = (h / videoRatio).toInt()
         } else {
-            // Landscape video: limit by width
             w = maxW
             h = (w * videoRatio).toInt()
         }
@@ -382,12 +330,14 @@ class ScrcpyFloatingService : Service() {
         }
     }
 
+    // ============ Core: startScrcpy - like Easycontrol Client ============
+
     private fun startScrcpy() {
-        if (isRunning) return
+        if (status == 1) return
         Thread {
             try {
                 val client = AdbConnectionPlugin.sharedAdbClient ?: run {
-                    Log.e(TAG, "ADB client not available, aborting scrcpy session")
+                    Log.e(TAG, "ADB client not available")
                     stopSelf()
                     return@Thread
                 }
@@ -398,102 +348,131 @@ class ScrcpyFloatingService : Service() {
                 screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
                 mainHandler.post { updateOverlaySize() }
 
-                decodeVideo(session)
-            } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); stopSelf() }
+                // Create handler thread for MediaCodec
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    handlerThread = HandlerThread("floating_mediacodec")
+                    handlerThread?.start()
+                    handler = Handler(handlerThread!!.looper)
+                }
+
+                // Start keep-alive thread
+                lastKeepAliveTime = System.currentTimeMillis()
+                keepAliveThread = Thread({
+                    while (status != -1) {
+                        if (System.currentTimeMillis() - lastKeepAliveTime > timeoutDelay) {
+                            Log.e(TAG, "Keep-alive timeout")
+                            release(); stopSelf()
+                            break
+                        }
+                        try { Thread.sleep(1500) } catch (_: InterruptedException) { break }
+                    }
+                }, "floating-keepalive").also { it.start() }
+
+                // Set status to running
+                status = 1
+
+                // Start video thread
+                videoDecodeThread = Thread({ executeStreamVideo(session) }, "floating-video").also { it.start() }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "scrcpy failed", e)
+                stopSelf()
+            }
         }.start()
     }
 
-    private fun decodeVideo(session: ScrcpySession) {
-        isRunning = true
-        var lastPacketTime = System.currentTimeMillis()
-        while (isRunning) {
-            val packet = session.readVideoPacket() ?: break
-            val now = System.currentTimeMillis()
-            val gapMs = now - lastPacketTime
+    // ============ Video stream - like Easycontrol executeStreamVideo ============
 
-            if (packet.isSession) {
-                if (packet.width > 0 && packet.height > 0) {
-                    val newW = packet.width; val newH = packet.height
-                    val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
-                    screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured) {
+    private fun executeStreamVideo(session: ScrcpySession) {
+        try {
+            var csd0: Pair<ByteArray, Long>? = null
+            var csd1: Pair<ByteArray, Long>? = null
+
+            while (!Thread.interrupted()) {
+                val packet = session.readVideoPacket() ?: break
+                lastKeepAliveTime = System.currentTimeMillis()
+
+                if (packet.isSession) {
+                    if (packet.width > 0 && packet.height > 0) {
+                        screenWidth = packet.width
+                        screenHeight = packet.height
                         mainHandler.post { updateOverlaySize() }
-                        createDecoder(newW, newH)
-                    } else if (gapMs > 1500 && decoderConfigured) {
-                        try { decoder?.flush() } catch (_: Exception) {}
+                    }
+                    continue
+                }
+
+                if (packet.data.isEmpty()) continue
+
+                if (packet.isConfig) {
+                    if (csd0 == null) {
+                        csd0 = Pair(packet.data.clone(), packet.ptsUs)
+                    } else if (csd1 == null) {
+                        csd1 = Pair(packet.data.clone(), packet.ptsUs)
                     }
                 }
-                lastPacketTime = now; continue
-            }
 
-            if (gapMs > 1500 && decoderConfigured) {
-                try { decoder?.flush() } catch (_: Exception) {}
-            }
-            lastPacketTime = now
+                if (videoDecode == null && csd0 != null && screenWidth > 0 && screenHeight > 0) {
+                    val sur = surface ?: continue
+                    videoDecode = VideoDecode(
+                        Pair(screenWidth, screenHeight),
+                        sur,
+                        csd0!!,
+                        csd1,
+                        handler,
+                        session.videoCodecId,
+                    )
+                    Log.i(TAG, "Video decoder created: ${screenWidth}x${screenHeight}, codecId=0x${String.format("%x", session.videoCodecId)}")
+                }
 
-            if (packet.data.isEmpty()) continue
-            if (!decoderConfigured) {
-                if (screenWidth <= 0 || screenHeight <= 0) continue
-                createDecoder(screenWidth, screenHeight)
+                videoDecode?.decodeIn(packet.data, packet.ptsUs)
             }
-            feedPacket(packet.data, packet.ptsUs, packet.isConfig, packet.isKeyFrame)
+        } catch (e: Exception) {
+            Log.e(TAG, "Video stream error", e)
+        }
+        release()
+    }
+
+    // ============ Release - like Easycontrol Client.release() ============
+
+    private fun release() {
+        if (status == -1) return
+        status = -1
+
+        for (i in 0..4) {
+            try {
+                when (i) {
+                    0 -> {
+                        keepAliveThread?.interrupt()
+                        videoDecodeThread?.interrupt()
+                    }
+                    1 -> {
+                        keepAliveThread?.join(500)
+                        videoDecodeThread?.join(500)
+                    }
+                    2 -> {
+                        videoDecode?.release()
+                        videoDecode = null
+                    }
+                    3 -> {
+                        scrcpySession?.stop()
+                        scrcpySession = null
+                    }
+                    4 -> {
+                        handlerThread?.quitSafely()
+                        handlerThread = null
+                        handler = null
+                        surface = null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during cleanup step $i", e)
+            }
         }
     }
 
-    private fun createDecoder(width: Int, height: Int) {
-        releaseDecoder()
-        val s = surface ?: return
-        try {
-            // Create dedicated HandlerThread for decoder callbacks (like EasyControl)
-            codecHandlerThread = HandlerThread("floating_decoder").also { it.start() }
-            codecHandler = Handler(codecHandlerThread!!.looper)
-
-            val fmt = MediaFormat.createVideoFormat(codecMime, width, height)
-            decoder = MediaCodec.createDecoderByType(codecMime)
-            decoder!!.setCallback(decoderCallback, codecHandler)
-            decoder!!.configure(fmt, s, null, 0)
-            decoder!!.start()
-            decoderConfigured = true
-        } catch (e: Exception) { Log.e(TAG, "Decoder create failed", e); decoderConfigured = false }
-    }
-
-    private fun releaseDecoder() {
-        inputBufferQueue.clear()
-        try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
-        decoder = null; decoderConfigured = false
-        codecHandlerThread?.quitSafely()
-        codecHandlerThread = null
-        codecHandler = null
-    }
-
-    private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {
-        val d = decoder ?: return
-        try {
-            var inputIndex = inputBufferQueue.poll()
-            if (inputIndex == null && (isConfig || isKeyFrame)) {
-                inputIndex = inputBufferQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS)
-            }
-            if (inputIndex != null) {
-                val buf = d.getInputBuffer(inputIndex) ?: return
-                buf.clear(); buf.put(data)
-                var flags = 0
-                if (isKeyFrame) flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
-                if (isConfig) flags = flags or MediaCodec.BUFFER_FLAG_CODEC_CONFIG
-                d.queueInputBuffer(inputIndex, 0, data.size, ptsUs, flags)
-            }
-        } catch (e: Exception) { Log.e(TAG, "Feed error", e) }
-    }
-
-    private fun stopScrcpy() {
-        isRunning = false
-        releaseDecoder()
-        scrcpySession?.stop(); scrcpySession = null
-    }
-
     override fun onDestroy() {
-        stopScrcpy()
+        release()
         hideOverlay()
-        codecHandlerThread?.quitSafely()
         super.onDestroy()
     }
 }

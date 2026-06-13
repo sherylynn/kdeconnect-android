@@ -3,14 +3,12 @@ package org.kde.kdeconnect.plugins.adbconnection
 import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.pm.ActivityInfo
-import android.media.MediaCodec
-import android.media.MediaFormat
-import android.media.AudioTrack
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.provider.Settings
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.util.Rational
 import android.view.KeyEvent
@@ -26,46 +24,60 @@ import org.kde.kdeconnect_tp.R
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputTextureView
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.TouchEventHandler
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.VideoDecode
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.AudioDecode
 
+/**
+ * Scrcpy remote control activity.
+ * Architecture ported from Easycontrol_For_Car Client.java:
+ * - status: 0=initial, 1=running, -1=stopped
+ * - executeStreamVideo: video decode thread
+ * - executeStreamIn: audio/control stream thread
+ * - keepAliveThread: heartbeat detection
+ * - release: ordered cleanup
+ */
 class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallbacks, ScrcpyInputTextureView.SurfaceCallback {
+
+    companion object {
+        const val TAG = "ScrcpyActivity"
+        const val EXTRA_HOST = "host"
+        const val EXTRA_PORT = "port"
+        const val EXTRA_PREFS_NAME = "prefs_name"
+    }
 
     private lateinit var surfaceView: ScrcpyInputTextureView
     private lateinit var navBar: LinearLayout
     private lateinit var barView: GridLayout
     private lateinit var buttonMore: ImageView
 
-    private var decoder: MediaCodec? = null
     private var scrcpySession: ScrcpySession? = null
     private var surface: Surface? = null
-    private var isRunning = false
     private var screenWidth = 0
     private var screenHeight = 0
-    private var decoderConfigured = false
-    private var codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
-    private val inputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
-    private var decoderHandlerThread: android.os.HandlerThread? = null
-    private var decoderHandler: Handler? = null
 
-    // Audio components
-    private var audioCodec: MediaCodec? = null
-    private var audioTrack: AudioTrack? = null
-    private var audioThread: Thread? = null
-    private var audioDecoderHandlerThread: android.os.HandlerThread? = null
-    private var audioDecoderHandler: Handler? = null
-    private val audioInputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
+    // Decoder components - like Easycontrol Client
+    private var handlerThread: HandlerThread? = null
+    private var handler: Handler? = null
+    private var videoDecode: VideoDecode? = null
+    private var audioDecode: AudioDecode? = null
 
     private var host: String = ""
     private var port: Int = 0
     private var prefsName: String = ""
     private var touchEventHandler: TouchEventHandler? = null
-    private val gotOutputFormat = AtomicBoolean(false)
     private var isInPipMode = false
     private var isNavBarVisible = true
     private var moreMenuHandler = Handler(Looper.getMainLooper())
     private var moreMenuRunnable: Runnable? = null
+
+    // Status management - exactly like Easycontrol Client
+    // 0: initial, 1: running, -1: stopped
+    private var status = 0
+    private var videoDecodeThread: Thread? = null
+    private var audioDecodeThread: Thread? = null
+    private var keepAliveThread: Thread? = null
+    private var lastKeepAliveTime = 0L
+    private val timeoutDelay = 5000L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,7 +93,6 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         Log.i(TAG, "onCreate: host=$host, port=$port, prefs=$prefsName")
         if (host.isEmpty() || port == 0) { finish(); return }
 
-        // Setup new UI elements
         navBar = findViewById(R.id.nav_bar)
         barView = findViewById(R.id.bar_view)
         buttonMore = findViewById(R.id.button_more)
@@ -90,11 +101,9 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         setupBarView()
         setupMoreButton()
 
-        // Show nav bar by default
         navBar.visibility = View.VISIBLE
         isNavBarVisible = true
 
-        // Hide system bars for fullscreen
         window.decorView.systemUiVisibility = (
             View.SYSTEM_UI_FLAG_FULLSCREEN or
             View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
@@ -102,42 +111,48 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         )
     }
 
-    override fun onSurfaceReady(surface: Surface) { this.surface = surface; startScrcpy() }
-    override fun onSurfaceDestroyed() { stopScrcpy() }
+    override fun onSurfaceReady(surface: Surface) {
+        this.surface = surface
+        startScrcpy()
+    }
+
+    override fun onSurfaceDestroyed() {
+        release(null)
+    }
 
     override fun handleKeyEvent(event: KeyEvent): Boolean {
         val session = scrcpySession ?: return false
-        if (!isRunning || event.keyCode == KeyEvent.KEYCODE_BACK) return false
+        if (status != 1 || event.keyCode == KeyEvent.KEYCODE_BACK) return false
         session.sendKeyEvent(event.action, event.keyCode, event.metaState)
         return true
     }
+
     override fun handleCommitText(text: CharSequence): Boolean { return true }
+
     override fun handleDeleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
         val session = scrcpySession ?: return false
-        if (!isRunning) return false
-        repeat(beforeLength.coerceAtLeast(0)) { session.sendKeyEvent(0, KeyEvent.KEYCODE_DEL); session.sendKeyEvent(1, KeyEvent.KEYCODE_DEL) }
-        repeat(afterLength.coerceAtLeast(0)) { session.sendKeyEvent(0, KeyEvent.KEYCODE_FORWARD_DEL); session.sendKeyEvent(1, KeyEvent.KEYCODE_FORWARD_DEL) }
+        if (status != 1) return false
+        repeat(beforeLength.coerceAtLeast(0)) {
+            session.sendKeyEvent(0, KeyEvent.KEYCODE_DEL)
+            session.sendKeyEvent(1, KeyEvent.KEYCODE_DEL)
+        }
+        repeat(afterLength.coerceAtLeast(0)) {
+            session.sendKeyEvent(0, KeyEvent.KEYCODE_FORWARD_DEL)
+            session.sendKeyEvent(1, KeyEvent.KEYCODE_FORWARD_DEL)
+        }
         return true
     }
 
-    /**
-     * Intercept touch events. If touch is on UI elements, let the normal
-     * view hierarchy handle it. Otherwise, send to scrcpy session.
-     */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        // Check if touch is on new UI elements - let them handle it normally
         if (isTouchOnView(navBar, event) || isTouchOnView(buttonMore, event) || isTouchOnView(barView, event)) {
             return super.dispatchTouchEvent(event)
         }
-        // Hide bar view when touching elsewhere
         if (barView.visibility == View.VISIBLE) {
             hideBarView()
         }
-        // Send to scrcpy session
         val handler = touchEventHandler
-        if (handler != null && isRunning) {
+        if (handler != null && status == 1) {
             handler.updateDimensions(surfaceView.width, surfaceView.height)
-            // Convert event coordinates from Activity window space to SurfaceView-local space
             val location = IntArray(2)
             surfaceView.getLocationOnScreen(location)
             val localX = location[0].toFloat()
@@ -159,26 +174,22 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
                y >= location[1] && y <= location[1] + view.height
     }
 
-    // ============ New UI Setup Methods ============
+    // ============ UI Setup ============
 
     private fun setupBottomNavBar() {
-        // Rotate button
         findViewById<ImageView>(R.id.button_rotate).setOnClickListener {
             scrcpySession?.rotateDevice()
             resetBarViewTimer()
         }
-        // App switch button
         findViewById<ImageView>(R.id.button_switch).setOnClickListener {
             scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
             scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
             resetBarViewTimer()
         }
-        // Home button
         findViewById<ImageView>(R.id.button_home).setOnClickListener {
             scrcpySession?.sendHome()
             resetBarViewTimer()
         }
-        // Back button
         findViewById<ImageView>(R.id.button_back).setOnClickListener {
             scrcpySession?.sendBack()
             resetBarViewTimer()
@@ -186,48 +197,39 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
     }
 
     private fun setupBarView() {
-        // Nav toggle
         findViewById<ImageView>(R.id.button_nav_bar).setOnClickListener {
             isNavBarVisible = !isNavBarVisible
             navBar.visibility = if (isNavBarVisible) View.VISIBLE else View.GONE
             resetBarViewTimer()
         }
-        // Minimize
         findViewById<ImageView>(R.id.button_mini).setOnClickListener {
             moveTaskToBack(true)
             resetBarViewTimer()
         }
-        // PiP (full_exit)
         findViewById<ImageView>(R.id.button_full_exit).setOnClickListener {
             if (!isInPipMode) enterPipMode()
             hideBarView()
         }
-        // Close
         findViewById<ImageView>(R.id.button_close).setOnClickListener {
-            stopScrcpy()
+            release(null)
             finish()
         }
-        // Transfer (notification panel)
         findViewById<ImageView>(R.id.button_transfer).setOnClickListener {
             scrcpySession?.expandNotificationPanel()
             resetBarViewTimer()
         }
-        // Light off (turn off screen)
         findViewById<ImageView>(R.id.button_light_off).setOnClickListener {
             scrcpySession?.setDisplayPower(false)
             resetBarViewTimer()
         }
-        // Power - KEYCODE_POWER shows power menu
         findViewById<ImageView>(R.id.button_power).setOnClickListener {
             scrcpySession?.sendKeyClick(KeyEvent.KEYCODE_POWER)
             resetBarViewTimer()
         }
-        // Lock - KEYCODE_SLEEP locks the screen
         findViewById<ImageView>(R.id.button_lock).setOnClickListener {
             scrcpySession?.lockDevice()
             resetBarViewTimer()
         }
-        // Floating window
         findViewById<ImageView>(R.id.button_floating).setOnClickListener {
             switchToFloating()
             resetBarViewTimer()
@@ -236,11 +238,7 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
 
     private fun setupMoreButton() {
         buttonMore.setOnClickListener {
-            if (barView.visibility == View.VISIBLE) {
-                hideBarView()
-            } else {
-                showBarView()
-            }
+            if (barView.visibility == View.VISIBLE) hideBarView() else showBarView()
         }
     }
 
@@ -256,9 +254,7 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
     }
 
-    private fun resetBarViewTimer() {
-        startBarViewTimer()
-    }
+    private fun resetBarViewTimer() { startBarViewTimer() }
 
     private fun startBarViewTimer() {
         moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
@@ -266,161 +262,7 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         moreMenuHandler.postDelayed(moreMenuRunnable!!, 3000)
     }
 
-    // ============ Decoder Methods (Async Callback like EasyControl) ============
-
-    private val decoderCallback = object : MediaCodec.Callback() {
-        override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
-            inputBufferQueue.offer(index)
-        }
-
-        override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
-            try {
-                codec.releaseOutputBuffer(index, true)
-            } catch (e: Exception) { Log.e(TAG, "Release output buffer error", e) }
-        }
-
-        override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
-            Log.e(TAG, "Decoder error", e)
-        }
-
-        override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
-            val w = if (format.containsKey("crop-right") && format.containsKey("crop-left"))
-                format.getInteger("crop-right") - format.getInteger("crop-left") + 1
-            else format.getInteger(MediaFormat.KEY_WIDTH)
-            val h = if (format.containsKey("crop-bottom") && format.containsKey("crop-top"))
-                format.getInteger("crop-bottom") - format.getInteger("crop-top") + 1
-            else format.getInteger(MediaFormat.KEY_HEIGHT)
-            Log.i(TAG, "Output format changed: ${w}x${h}")
-            if (w > 0 && h > 0) {
-                screenWidth = w; screenHeight = h
-                runOnUiThread {
-                    surfaceView.setVideoDimensions(screenWidth, screenHeight)
-                    requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                    touchEventHandler?.updateSessionDimensions(screenWidth, screenHeight)
-                }
-            }
-        }
-    }
-
-    private val audioDecoderCallback = object : MediaCodec.Callback() {
-        override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
-            audioInputBufferQueue.offer(index)
-        }
-
-        override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
-            val track = audioTrack
-            if (track == null || info.size == 0) {
-                codec.releaseOutputBuffer(index, false)
-                return
-            }
-            try {
-                val buffer = codec.getOutputBuffer(index)
-                if (buffer != null) {
-                    track.write(buffer, info.size, AudioTrack.WRITE_BLOCKING)
-                }
-                codec.releaseOutputBuffer(index, false)
-            } catch (e: Exception) { Log.e(TAG, "Audio output buffer error", e) }
-        }
-
-        override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
-            Log.e(TAG, "Audio decoder error", e)
-        }
-
-        override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
-            Log.i(TAG, "Audio output format changed: $format")
-            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-            val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            val channelConfig = if (channelCount == 1) android.media.AudioFormat.CHANNEL_OUT_MONO else android.media.AudioFormat.CHANNEL_OUT_STEREO
-            val bufferSize = android.media.AudioTrack.getMinBufferSize(sampleRate, channelConfig, android.media.AudioFormat.ENCODING_PCM_16BIT)
-
-            audioTrack?.release()
-            audioTrack = android.media.AudioTrack.Builder()
-                .setAudioAttributes(
-                    android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .build()
-                )
-                .setAudioFormat(
-                    android.media.AudioFormat.Builder()
-                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(channelConfig)
-                        .build()
-                )
-                .setBufferSizeInBytes(bufferSize)
-                .build()
-            audioTrack!!.play()
-        }
-    }
-
-    private fun createDecoder(width: Int, height: Int) {
-        releaseDecoder()
-        try {
-            Log.i(TAG, "Creating decoder: ${codecMime} ${width}x${height}")
-            decoderHandlerThread = android.os.HandlerThread("scrcpy_decoder").also { it.start() }
-            decoderHandler = Handler(decoderHandlerThread!!.looper)
-            val format = MediaFormat.createVideoFormat(codecMime, width, height)
-            decoder = MediaCodec.createDecoderByType(codecMime)
-            decoder!!.setCallback(decoderCallback, decoderHandler)
-            decoder!!.configure(format, surface, null, 0)
-            decoder!!.start()
-            decoderConfigured = true
-        } catch (e: Exception) { Log.e(TAG, "Decoder create failed", e); decoderConfigured = false }
-    }
-
-    private fun createAudioDecoder() {
-        releaseAudioDecoder()
-        try {
-            val audioMime = MediaFormat.MIMETYPE_AUDIO_AAC
-            Log.i(TAG, "Creating audio decoder: $audioMime")
-            audioDecoderHandlerThread = android.os.HandlerThread("scrcpy_audio_decoder").also { it.start() }
-            audioDecoderHandler = Handler(audioDecoderHandlerThread!!.looper)
-            val format = MediaFormat.createAudioFormat(audioMime, 48000, 2)
-            audioCodec = MediaCodec.createDecoderByType(audioMime)
-            audioCodec!!.setCallback(audioDecoderCallback, audioDecoderHandler)
-            audioCodec!!.configure(format, null, null, 0)
-            audioCodec!!.start()
-        } catch (e: Exception) { Log.e(TAG, "Audio decoder create failed", e) }
-    }
-
-    private fun releaseDecoder() {
-        inputBufferQueue.clear()
-        try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
-        decoder = null; decoderConfigured = false
-        decoderHandlerThread?.quitSafely()
-        decoderHandlerThread = null
-        decoderHandler = null
-    }
-
-    private fun releaseAudioDecoder() {
-        audioInputBufferQueue.clear()
-        try { audioCodec?.stop(); audioCodec?.release() } catch (_: Exception) {}
-        audioCodec = null
-        try { audioTrack?.stop(); audioTrack?.release() } catch (_: Exception) {}
-        audioTrack = null
-        audioDecoderHandlerThread?.quitSafely()
-        audioDecoderHandlerThread = null
-        audioDecoderHandler = null
-    }
-
-    private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {
-        val d = decoder ?: return
-        try {
-            var inputIndex = inputBufferQueue.poll()
-            if (inputIndex == null && (isConfig || isKeyFrame)) {
-                inputIndex = inputBufferQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS)
-            }
-            if (inputIndex != null) {
-                val buf = d.getInputBuffer(inputIndex) ?: return
-                buf.clear(); buf.put(data)
-                var flags = 0
-                if (isKeyFrame) flags = flags or MediaCodec.BUFFER_FLAG_KEY_FRAME
-                if (isConfig) flags = flags or MediaCodec.BUFFER_FLAG_CODEC_CONFIG
-                d.queueInputBuffer(inputIndex, 0, data.size, ptsUs, flags)
-            }
-        } catch (e: Exception) { Log.e(TAG, "Feed error", e) }
-    }
+    // ============ Core: startScrcpy - like Easycontrol Client constructor ============
 
     private fun startScrcpy() {
         Thread {
@@ -428,7 +270,7 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
                 Log.i(TAG, "Starting scrcpy session...")
 
                 val client = AdbConnectionPlugin.sharedAdbClient ?: run {
-                    Log.e(TAG, "ADB client not available, aborting scrcpy session")
+                    Log.e(TAG, "ADB client not available")
                     runOnUiThread {
                         Toast.makeText(this, "ADB client not connected", Toast.LENGTH_SHORT).show()
                         finish()
@@ -448,15 +290,15 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
                 screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
 
                 var viewWidth = 0; var viewHeight = 0
-                val latch = CountDownLatch(1)
-                runOnUiThread { viewWidth = surfaceView.width; viewHeight = surfaceView.height; latch.countDown() }
-                latch.await(1, TimeUnit.SECONDS)
-                Log.i(TAG, "View: ${viewWidth}x${viewHeight}, Session: ${screenWidth}x${screenHeight}")
-
-                if (screenWidth > 0 && screenHeight > 0) {
-                    runOnUiThread {
+                runOnUiThread {
+                    viewWidth = surfaceView.width
+                    viewHeight = surfaceView.height
+                    if (screenWidth > 0 && screenHeight > 0) {
                         surfaceView.setVideoDimensions(screenWidth, screenHeight)
-                        requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        requestedOrientation = if (screenWidth > screenHeight)
+                            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        else
+                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     }
                 }
 
@@ -466,110 +308,207 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
                     touchAreaWidth = viewWidth,
                     touchAreaHeight = viewHeight,
                     onInjectTouch = { action, pointerId, x, y, pressure, actionButton, buttons ->
-                        val sw = screenWidth.takeIf { it > 0 } ?: 1920; val sh = screenHeight.takeIf { it > 0 } ?: 1080
+                        val sw = screenWidth.takeIf { it > 0 } ?: 1920
+                        val sh = screenHeight.takeIf { it > 0 } ?: 1080
                         session.sendTouchEvent(action, pointerId, x, y, sw, sh, pressure, actionButton, buttons)
                     },
                     onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
                 )
 
-                if (session.audioCodecId != 0) {
-                    createAudioDecoder()
-                    audioThread = Thread({ decodeAudio(session) }, "scrcpy-audio")
-                    audioThread?.start()
+                // Create handler thread for MediaCodec - like Easycontrol
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    handlerThread = HandlerThread("scrcpy_mediacodec")
+                    handlerThread?.start()
+                    handler = Handler(handlerThread!!.looper)
                 }
 
-                decodeVideo(session)
-            } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); finish() }
+                // Start keep-alive thread - like Easycontrol keepAliveThread
+                lastKeepAliveTime = System.currentTimeMillis()
+                keepAliveThread = Thread({
+                    while (status != -1) {
+                        if (System.currentTimeMillis() - lastKeepAliveTime > timeoutDelay) {
+                            Log.e(TAG, "Keep-alive timeout")
+                            runOnUiThread { release(null); finish() }
+                            break
+                        }
+                        try { Thread.sleep(1500) } catch (_: InterruptedException) { break }
+                    }
+                }, "scrcpy-keepalive").also { it.start() }
+
+                // Set status to running - like Easycontrol: status = 1
+                status = 1
+
+                // Start audio thread - like Easycontrol executeStreamInThread
+                if (session.audioCodecId != 0) {
+                    audioDecodeThread = Thread({ executeStreamIn(session) }, "scrcpy-audio").also { it.start() }
+                }
+
+                // Start video thread - like Easycontrol executeStreamVideoThread
+                videoDecodeThread = Thread({ executeStreamVideo(session) }, "scrcpy-video").also { it.start() }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "scrcpy failed", e)
+                finish()
+            }
         }.start()
     }
 
-    private fun decodeVideo(session: ScrcpySession) {
-        isRunning = true
-        var lastPacketTime = System.currentTimeMillis()
-        while (isRunning) {
-            val packet = session.readVideoPacket() ?: break
-            val now = System.currentTimeMillis()
-            val gapMs = now - lastPacketTime
+    // ============ Video stream thread - like Easycontrol executeStreamVideo ============
 
-            if (packet.isSession) {
-                if (packet.width > 0 && packet.height > 0) {
-                    val newW = packet.width
-                    val newH = packet.height
-                    val sizeChanged = decoderConfigured && (newW != screenWidth || newH != screenHeight)
-                    screenWidth = newW; screenHeight = newH
-                    if (sizeChanged || !decoderConfigured) {
-                        Log.i(TAG, "Recreating decoder: ${newW}x${newH}")
-                        createDecoder(newW, newH)
-                    } else if (gapMs > 1500 && decoderConfigured) {
-                        Log.i(TAG, "Session after gap ${gapMs}ms, flushing decoder")
-                        try { decoder?.flush() } catch (_: Exception) {}
+    private fun executeStreamVideo(session: ScrcpySession) {
+        try {
+            var csd0: Pair<ByteArray, Long>? = null
+            var csd1: Pair<ByteArray, Long>? = null
+
+            while (!Thread.interrupted()) {
+                val packet = session.readVideoPacket() ?: break
+                lastKeepAliveTime = System.currentTimeMillis()
+
+                if (packet.isSession) {
+                    if (packet.width > 0 && packet.height > 0) {
+                        screenWidth = packet.width
+                        screenHeight = packet.height
+                        runOnUiThread {
+                            surfaceView.setVideoDimensions(screenWidth, screenHeight)
+                            requestedOrientation = if (screenWidth > screenHeight)
+                                ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                            else
+                                ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                            touchEventHandler?.updateSessionDimensions(screenWidth, screenHeight)
+                        }
                     }
-                    runOnUiThread {
-                        surfaceView.setVideoDimensions(screenWidth, screenHeight)
-                        requestedOrientation = if (screenWidth > screenHeight) ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        touchEventHandler?.updateSessionDimensions(screenWidth, screenHeight)
+                    continue
+                }
+
+                if (packet.data.isEmpty()) continue
+
+                // Collect config frames - like Easycontrol reads csd0/csd1 from stream
+                if (packet.isConfig) {
+                    if (csd0 == null) {
+                        csd0 = Pair(packet.data.clone(), packet.ptsUs)
+                    } else if (csd1 == null) {
+                        csd1 = Pair(packet.data.clone(), packet.ptsUs)
                     }
                 }
-                lastPacketTime = now
-                continue
-            }
 
-            // Detect stream gap in non-session path (screen lock/unlock)
-            if (gapMs > 1500 && decoderConfigured) {
-                Log.i(TAG, "Stream gap ${gapMs}ms, flushing decoder")
-                try { decoder?.flush() } catch (_: Exception) {}
-            }
-            lastPacketTime = now
-
-            if (packet.data.isEmpty()) continue
-            if (!decoderConfigured) {
-                if (screenWidth <= 0 || screenHeight <= 0) continue
-                createDecoder(screenWidth, screenHeight)
-            }
-            feedPacket(packet.data, packet.ptsUs, packet.isConfig, packet.isKeyFrame)
-        }
-        isRunning = false
-    }
-
-    private fun decodeAudio(session: ScrcpySession) {
-        while (isRunning) {
-            val packet = session.readAudioPacket() ?: break
-            if (packet.data.isEmpty()) continue
-
-            val codec = audioCodec ?: continue
-            try {
-                val inputIndex = audioInputBufferQueue.poll(50, TimeUnit.MILLISECONDS)
-                if (inputIndex != null) {
-                    val buf = codec.getInputBuffer(inputIndex)
-                    if (buf != null) {
-                        buf.clear()
-                        buf.put(packet.data)
-                        codec.queueInputBuffer(inputIndex, 0, packet.data.size, packet.ptsUs, 0)
-                    }
+                // Create decoder when we have config data and dimensions - like Easycontrol
+                if (videoDecode == null && csd0 != null && screenWidth > 0 && screenHeight > 0) {
+                    val sur = surface ?: continue
+                    val h = handler
+                    videoDecode = VideoDecode(
+                        Pair(screenWidth, screenHeight),
+                        sur,
+                        csd0!!,
+                        csd1,
+                        h,
+                        session.videoCodecId,
+                    )
+                    Log.i(TAG, "Video decoder created: ${screenWidth}x${screenHeight}, codecId=0x${String.format("%x", session.videoCodecId)}")
                 }
-            } catch (e: Exception) { Log.e(TAG, "Feed audio error", e) }
+
+                // Feed data to decoder - like Easycontrol: videoDecode.decodeIn(data, pts)
+                videoDecode?.decodeIn(packet.data, packet.ptsUs)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Video stream error", e)
+        }
+        release(null)
+    }
+
+    // ============ Audio/control stream thread - like Easycontrol executeStreamIn ============
+
+    private fun executeStreamIn(session: ScrcpySession) {
+        try {
+            val useOpus = session.audioCodecId == 0x6f707573 // "opus"
+
+            while (!Thread.interrupted()) {
+                val packet = session.readAudioPacket() ?: break
+                lastKeepAliveTime = System.currentTimeMillis()
+
+                if (packet.data.isEmpty()) continue
+
+                // First audio packet is csd0 - like Easycontrol
+                if (audioDecode == null) {
+                    try {
+                        audioDecode = AudioDecode(useOpus, packet.data, handler)
+                        audioDecode?.playAudio(true)
+                        Log.i(TAG, "Audio decoder created, useOpus=$useOpus")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to create audio decoder", e)
+                    }
+                } else {
+                    audioDecode?.decodeIn(packet.data)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Audio stream error", e)
         }
     }
 
-    private fun stopScrcpy() {
-        isRunning = false
-        gotOutputFormat.set(false)
-        releaseDecoder()
-        releaseAudioDecoder()
-        audioThread?.interrupt()
+    // ============ Release - like Easycontrol Client.release() ============
 
-        // Lock device on disconnect if enabled (read from plugin's SharedPreferences)
+    private fun release(error: String?) {
+        if (status == -1) return
+        status = -1
+
+        if (error != null) {
+            Log.e(TAG, "Release due to: $error")
+        }
+
+        // Lock device on disconnect if enabled
         if (prefsName.isNotEmpty()) {
             val prefs = getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE)
             if (prefs.getBoolean("scrcpy_lock_on_disconnect", false)) {
                 scrcpySession?.lockDevice()
-                // Wait a bit for the lock command to be sent
-                try { Thread.sleep(100) } catch (e: InterruptedException) { }
+                try { Thread.sleep(100) } catch (_: InterruptedException) {}
             }
         }
-        
-        scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
+
+        // Ordered cleanup - like Easycontrol release() switch-case
+        for (i in 0..6) {
+            try {
+                when (i) {
+                    0 -> {
+                        keepAliveThread?.interrupt()
+                        audioDecodeThread?.interrupt()
+                        videoDecodeThread?.interrupt()
+                    }
+                    1 -> {
+                        keepAliveThread?.join(500)
+                        audioDecodeThread?.join(500)
+                        videoDecodeThread?.join(500)
+                    }
+                    2 -> {
+                        videoDecode?.release()
+                        videoDecode = null
+                    }
+                    3 -> {
+                        audioDecode?.release()
+                        audioDecode = null
+                    }
+                    4 -> {
+                        scrcpySession?.stop()
+                        scrcpySession = null
+                    }
+                    5 -> {
+                        touchEventHandler = null
+                    }
+                    6 -> {
+                        handlerThread?.quitSafely()
+                        handlerThread = null
+                        handler = null
+                        surface = null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during cleanup step $i", e)
+            }
+        }
+
+        Log.i(TAG, "Scrcpy released")
     }
+
+    // ============ Floating window ============
 
     private fun switchToFloating() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
@@ -579,7 +518,6 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
             startActivity(intent)
             return
         }
-        // Start floating service
         val serviceIntent = Intent(this, ScrcpyFloatingService::class.java).apply {
             action = ScrcpyFloatingService.ACTION_START
             putExtra(ScrcpyFloatingService.EXTRA_HOST, host)
@@ -588,19 +526,15 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(serviceIntent)
         else startService(serviceIntent)
-        // Stop current session
-        isRunning = false
-        releaseDecoder()
-        releaseAudioDecoder()
-        audioThread?.interrupt()
-        scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
+        release(null)
         finish()
     }
 
-    // Picture-in-Picture support
+    // ============ PiP ============
+
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (isRunning && screenWidth > 0 && screenHeight > 0) {
+        if (status == 1 && screenWidth > 0 && screenHeight > 0) {
             enterPipMode()
         }
     }
@@ -643,15 +577,7 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
 
     override fun onDestroy() {
         moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
+        release(null)
         super.onDestroy()
-        stopScrcpy()
-    }
-
-    companion object {
-        private const val TAG = "ScrcpyActivity"
-        const val EXTRA_HOST = "host"
-        const val EXTRA_PORT = "port"
-        const val EXTRA_DEVICE_ID = "device_id"
-        const val EXTRA_PREFS_NAME = "prefs_name"
     }
 }
