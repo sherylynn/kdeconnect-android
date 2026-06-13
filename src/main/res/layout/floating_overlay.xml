@@ -44,8 +44,7 @@
         android:layout_gravity="bottom"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:background="#CC1A1A1E"
-        android:paddingHorizontal="2dp">
+        android:background="#CC1A1A1E">
 
         <View
             android:id="@+id/resize_bl"
