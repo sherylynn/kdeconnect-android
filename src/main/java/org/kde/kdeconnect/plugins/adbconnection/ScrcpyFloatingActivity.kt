@@ -245,7 +245,12 @@ class ScrcpyFloatingActivity : Activity(), ScrcpyInputTextureView.InputCallbacks
     private fun startScrcpy() {
         Thread {
             try {
-                val session = ScrcpySession(host, port, this, prefsName)
+                val client = AdbConnectionPlugin.sharedAdbClient ?: run {
+                    Log.e(TAG, "ADB client not available, aborting scrcpy session")
+                    finish()
+                    return@Thread
+                }
+                val session = ScrcpySession(client, this, prefsName)
                 if (!session.start()) { finish(); return@Thread }
                 scrcpySession = session
                 screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0

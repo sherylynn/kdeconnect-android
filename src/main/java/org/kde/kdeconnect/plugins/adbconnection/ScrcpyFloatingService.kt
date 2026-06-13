@@ -378,7 +378,12 @@ class ScrcpyFloatingService : Service() {
         if (isRunning) return
         Thread {
             try {
-                val session = ScrcpySession(host, port, this, prefsName)
+                val client = AdbConnectionPlugin.sharedAdbClient ?: run {
+                    Log.e(TAG, "ADB client not available, aborting scrcpy session")
+                    stopSelf()
+                    return@Thread
+                }
+                val session = ScrcpySession(client, this, prefsName)
                 if (!session.start()) { stopSelf(); return@Thread }
                 scrcpySession = session
                 screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0

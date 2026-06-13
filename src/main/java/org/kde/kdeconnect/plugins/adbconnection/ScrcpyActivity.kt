@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.media.MediaCodec
 import android.media.MediaFormat
+import android.media.AudioTrack
 import android.os.Build
 import android.provider.Settings
 import android.os.Bundle
@@ -47,6 +48,14 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
     private val inputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
     private var decoderHandlerThread: android.os.HandlerThread? = null
     private var decoderHandler: Handler? = null
+
+    // Audio components
+    private var audioCodec: MediaCodec? = null
+    private var audioTrack: AudioTrack? = null
+    private var audioThread: Thread? = null
+    private var audioDecoderHandlerThread: android.os.HandlerThread? = null
+    private var audioDecoderHandler: Handler? = null
+    private val audioInputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
 
     private var host: String = ""
     private var port: Int = 0
@@ -293,6 +302,58 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         }
     }
 
+    private val audioDecoderCallback = object : MediaCodec.Callback() {
+        override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
+            audioInputBufferQueue.offer(index)
+        }
+
+        override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+            val track = audioTrack
+            if (track == null || info.size == 0) {
+                codec.releaseOutputBuffer(index, false)
+                return
+            }
+            try {
+                val buffer = codec.getOutputBuffer(index)
+                if (buffer != null) {
+                    track.write(buffer, info.size, AudioTrack.WRITE_BLOCKING)
+                }
+                codec.releaseOutputBuffer(index, false)
+            } catch (e: Exception) { Log.e(TAG, "Audio output buffer error", e) }
+        }
+
+        override fun onError(codec: MediaCodec, e: MediaCodec.CodecException) {
+            Log.e(TAG, "Audio decoder error", e)
+        }
+
+        override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+            Log.i(TAG, "Audio output format changed: $format")
+            val sampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            val channelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            val channelConfig = if (channelCount == 1) android.media.AudioFormat.CHANNEL_OUT_MONO else android.media.AudioFormat.CHANNEL_OUT_STEREO
+            val bufferSize = android.media.AudioTrack.getMinBufferSize(sampleRate, channelConfig, android.media.AudioFormat.ENCODING_PCM_16BIT)
+
+            audioTrack?.release()
+            audioTrack = android.media.AudioTrack.Builder()
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    android.media.AudioFormat.Builder()
+                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(channelConfig)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .build()
+            audioTrack!!.play()
+        }
+    }
+
     private fun createDecoder(width: Int, height: Int) {
         releaseDecoder()
         try {
@@ -308,6 +369,21 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         } catch (e: Exception) { Log.e(TAG, "Decoder create failed", e); decoderConfigured = false }
     }
 
+    private fun createAudioDecoder() {
+        releaseAudioDecoder()
+        try {
+            val audioMime = MediaFormat.MIMETYPE_AUDIO_AAC
+            Log.i(TAG, "Creating audio decoder: $audioMime")
+            audioDecoderHandlerThread = android.os.HandlerThread("scrcpy_audio_decoder").also { it.start() }
+            audioDecoderHandler = Handler(audioDecoderHandlerThread!!.looper)
+            val format = MediaFormat.createAudioFormat(audioMime, 48000, 2)
+            audioCodec = MediaCodec.createDecoderByType(audioMime)
+            audioCodec!!.setCallback(audioDecoderCallback, audioDecoderHandler)
+            audioCodec!!.configure(format, null, null, 0)
+            audioCodec!!.start()
+        } catch (e: Exception) { Log.e(TAG, "Audio decoder create failed", e) }
+    }
+
     private fun releaseDecoder() {
         inputBufferQueue.clear()
         try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
@@ -315,6 +391,17 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         decoderHandlerThread?.quitSafely()
         decoderHandlerThread = null
         decoderHandler = null
+    }
+
+    private fun releaseAudioDecoder() {
+        audioInputBufferQueue.clear()
+        try { audioCodec?.stop(); audioCodec?.release() } catch (_: Exception) {}
+        audioCodec = null
+        try { audioTrack?.stop(); audioTrack?.release() } catch (_: Exception) {}
+        audioTrack = null
+        audioDecoderHandlerThread?.quitSafely()
+        audioDecoderHandlerThread = null
+        audioDecoderHandler = null
     }
 
     private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {
@@ -338,9 +425,23 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
     private fun startScrcpy() {
         Thread {
             try {
-                Log.i(TAG, "Connecting to $host:$port...")
-                val session = ScrcpySession(host, port, this@ScrcpyActivity, prefsName)
-                if (!session.start()) { finish(); return@Thread }
+                Log.i(TAG, "Starting scrcpy session...")
+
+                val client = AdbConnectionPlugin.sharedAdbClient ?: run {
+                    Log.e(TAG, "ADB client not available, aborting scrcpy session")
+                    runOnUiThread {
+                        Toast.makeText(this, "ADB client not connected", Toast.LENGTH_SHORT).show()
+                        finish()
+                    }
+                    return@Thread
+                }
+
+                val session = ScrcpySession(client, this@ScrcpyActivity, prefsName)
+                if (!session.start()) {
+                    Log.e(TAG, "Failed to start scrcpy session")
+                    finish()
+                    return@Thread
+                }
                 Log.i(TAG, "Scrcpy started: device=${session.deviceName}")
                 scrcpySession = session
                 screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0
@@ -370,6 +471,13 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
                     },
                     onBackOrScreenOn = { action -> session.sendKeyEvent(action, KeyEvent.KEYCODE_BACK) },
                 )
+
+                if (session.audioCodecId != 0) {
+                    createAudioDecoder()
+                    audioThread = Thread({ decodeAudio(session) }, "scrcpy-audio")
+                    audioThread?.start()
+                }
+
                 decodeVideo(session)
             } catch (e: Exception) { Log.e(TAG, "scrcpy failed", e); finish() }
         }.start()
@@ -420,11 +528,36 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
             }
             feedPacket(packet.data, packet.ptsUs, packet.isConfig, packet.isKeyFrame)
         }
+        isRunning = false
+    }
+
+    private fun decodeAudio(session: ScrcpySession) {
+        while (isRunning) {
+            val packet = session.readAudioPacket() ?: break
+            if (packet.data.isEmpty()) continue
+
+            val codec = audioCodec ?: continue
+            try {
+                val inputIndex = audioInputBufferQueue.poll(50, TimeUnit.MILLISECONDS)
+                if (inputIndex != null) {
+                    val buf = codec.getInputBuffer(inputIndex)
+                    if (buf != null) {
+                        buf.clear()
+                        buf.put(packet.data)
+                        codec.queueInputBuffer(inputIndex, 0, packet.data.size, packet.ptsUs, 0)
+                    }
+                }
+            } catch (e: Exception) { Log.e(TAG, "Feed audio error", e) }
+        }
     }
 
     private fun stopScrcpy() {
-        isRunning = false; gotOutputFormat.set(false); releaseDecoder()
-        
+        isRunning = false
+        gotOutputFormat.set(false)
+        releaseDecoder()
+        releaseAudioDecoder()
+        audioThread?.interrupt()
+
         // Lock device on disconnect if enabled (read from plugin's SharedPreferences)
         if (prefsName.isNotEmpty()) {
             val prefs = getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE)
@@ -458,6 +591,8 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         // Stop current session
         isRunning = false
         releaseDecoder()
+        releaseAudioDecoder()
+        audioThread?.interrupt()
         scrcpySession?.stop(); scrcpySession = null; touchEventHandler = null
         finish()
     }

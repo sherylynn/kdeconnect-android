@@ -1,8 +1,9 @@
 package org.kde.kdeconnect.plugins.adbconnection.scrcpy
 
 import android.content.Context
-import android.view.KeyEvent
 import android.util.Log
+import android.view.KeyEvent
+import org.kde.kdeconnect.plugins.adbconnection.SimpleAdbClient
 import java.io.BufferedInputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -13,8 +14,7 @@ import java.nio.ByteOrder
 import kotlin.math.roundToInt
 
 class ScrcpySession(
-    private val adbHost: String,
-    private val adbPort: Int,
+    private val client: SimpleAdbClient,
     private val context: Context,
     private val prefsName: String = "",
 ) {
@@ -23,9 +23,7 @@ class ScrcpySession(
         private const val SERVER_VERSION = "4.0"
         private const val SERVER_ASSET = "bin/scrcpy-server-v4.0"
         private const val SERVER_REMOTE_PATH = "/data/local/tmp/scrcpy-server.jar"
-        private const val SERVER_BOOT_DELAY_MS = 200L
-        private const val CONNECT_RETRY_COUNT = 100
-        private const val CONNECT_RETRY_DELAY_MS = 100L
+        private const val SERVER_BOOT_DELAY_MS = 500L
         private const val DEVICE_NAME_FIELD_LENGTH = 64
 
         private const val PACKET_FLAG_SESSION = 1L shl 63
@@ -58,15 +56,18 @@ class ScrcpySession(
         private set
     var screenHeight: Int = 0
         private set
+    var audioCodecId: Int = 0
+        private set
     var isRunning: Boolean = false
         private set
 
-    private var connection: DirectAdbConnection? = null
-    private var videoStream: AdbSocketStream? = null
+    private var videoStream: SimpleAdbClient.AdbStream? = null
     private var videoInput: DataInputStream? = null
-    private var controlStream: AdbSocketStream? = null
+    private var audioStream: SimpleAdbClient.AdbStream? = null
+    private var audioInput: DataInputStream? = null
+    private var controlStream: SimpleAdbClient.AdbStream? = null
     private var controlOutput: DataOutputStream? = null
-    private var serverStream: AdbSocketStream? = null
+    private var serverStream: SimpleAdbClient.AdbStream? = null
 
     @Volatile
     private var closed = false
@@ -81,38 +82,35 @@ class ScrcpySession(
         val data: ByteArray = ByteArray(0),
     )
 
-    private fun extractServerToCache(): File {
-        val source = context.assets.open(SERVER_ASSET)
-        val outputFile = File(context.cacheDir, "scrcpy-server-v4.0")
-        source.use { input ->
-            outputFile.outputStream().use { output -> input.copyTo(output) }
-        }
-        return outputFile
-    }
+    data class AudioPacket(
+        val ptsUs: Long,
+        val data: ByteArray,
+    )
 
-    private fun openAbstractSocketWithRetry(
-        conn: DirectAdbConnection,
-        socketName: String,
-        expectDummyByte: Boolean,
-    ): AdbSocketStream {
-        var lastEx: Exception? = null
-        repeat(CONNECT_RETRY_COUNT) { attempt ->
-            try {
-                val stream = conn.openStream("localabstract:$socketName")
-                if (expectDummyByte) {
-                    val value = stream.inputStream.read()
-                    if (value < 0) {
-                        stream.close()
-                        throw IOException("scrcpy dummy byte missing")
-                    }
-                }
-                return stream
-            } catch (e: Exception) {
-                lastEx = e
-                if (attempt < CONNECT_RETRY_COUNT - 1) Thread.sleep(CONNECT_RETRY_DELAY_MS)
+    private fun extractAndPushServer(): Boolean {
+        try {
+            Log.i(TAG, "Extracting scrcpy server...")
+            val source = context.assets.open(SERVER_ASSET)
+            val serverJar = File(context.cacheDir, "scrcpy-server-v4.0.jar")
+            source.use { input ->
+                serverJar.outputStream().use { output -> input.copyTo(output) }
             }
+            Log.i(TAG, "Server: ${serverJar.absolutePath}, size: ${serverJar.length()}")
+
+            Log.i(TAG, "Pushing server to device...")
+            val success = client.push(serverJar.absolutePath, SERVER_REMOTE_PATH)
+            serverJar.delete()
+
+            if (success) {
+                Log.i(TAG, "Server pushed successfully")
+            } else {
+                Log.e(TAG, "Failed to push server")
+            }
+            return success
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to extract and push server", e)
+            return false
         }
-        throw IllegalStateException("Unable to open scrcpy socket '$socketName'", lastEx)
     }
 
     private fun readDeviceName(input: DataInputStream): String {
@@ -125,20 +123,13 @@ class ScrcpySession(
 
     fun start(): Boolean {
         try {
-            Log.i(TAG, "Connecting to ADB at $adbHost:$adbPort...")
-            val prefs = context.getSharedPreferences("adb_keys", Context.MODE_PRIVATE)
-            val conn = DirectAdbConnection(adbHost, adbPort, prefs)
-            conn.handshake()
-            connection = conn
-            Log.i(TAG, "ADB connected")
+            if (!client.isConnected) {
+                throw IllegalStateException("ADB client is not connected")
+            }
 
-            Log.i(TAG, "Extracting scrcpy server...")
-            val serverJar = extractServerToCache()
-            Log.i(TAG, "Server: ${serverJar.absolutePath}, size: ${serverJar.length()}")
-
-            Log.i(TAG, "Pushing server to device...")
-            conn.push(serverJar.readBytes(), SERVER_REMOTE_PATH)
-            Log.i(TAG, "Server pushed")
+            if (!extractAndPushServer()) {
+                throw IOException("Failed to push scrcpy-server.jar to device")
+            }
 
             // Build server command using ClientOptions → ServerParams, exactly like ScrcpyForAndroid
             val scid = (Math.random() * 0x7FFFFFFF).toInt().toUInt()
@@ -151,6 +142,10 @@ class ScrcpySession(
             }
             val videoCodec = Shared.Codec.fromString(
                 settings.getString("scrcpy_video_codec", "h264") ?: "h264"
+            )
+            val audioForward = settings.getBoolean("scrcpy_audio_forward", true)
+            val audioCodec = Shared.Codec.fromString(
+                settings.getString("scrcpy_audio_codec", "aac") ?: "aac"
             )
             val maxSize = (settings.getString("scrcpy_max_size", "0") ?: "0").toUShortOrNull() ?: 0u
             val maxFps = settings.getString("scrcpy_max_fps", "") ?: ""
@@ -165,13 +160,14 @@ class ScrcpySession(
             val appStream = settings.getString("scrcpy_app_stream", "") ?: ""
             val newDisplay = settings.getString("scrcpy_new_display", "") ?: ""
 
-            Log.i(TAG, "Settings: codec=$videoCodec, maxSize=$maxSize, maxFps=$maxFps, bitRate=$videoBitRate, control=$control, appStream=$appStream, newDisplay=$newDisplay")
+            Log.i(TAG, "Settings: videoCodec=$videoCodec, audioForward=$audioForward, audioCodec=$audioCodec, maxSize=$maxSize, maxFps=$maxFps, bitRate=$videoBitRate, control=$control, appStream=$appStream, newDisplay=$newDisplay")
 
             val options = ClientOptions(
                 video = true,
-                audio = false,
+                audio = audioForward,
                 control = control,
                 videoCodec = videoCodec,
+                audioCodec = audioCodec,
                 maxSize = maxSize,
                 maxFps = maxFps,
                 videoBitRate = videoBitRate,
@@ -193,15 +189,14 @@ class ScrcpySession(
             )
             Log.i(TAG, "Server command: $serverCommand")
 
-            val serverStream = conn.openStream("shell:$serverCommand")
-            this.serverStream = serverStream
+            serverStream = client.openStream("shell:$serverCommand")
             Log.i(TAG, "Server shell stream opened")
 
             // Server log thread
             Thread({
                 try {
                     val reader = java.io.BufferedReader(
-                        java.io.InputStreamReader(serverStream.inputStream, Charsets.UTF_8)
+                        java.io.InputStreamReader(serverStream!!.inputStream, Charsets.UTF_8)
                     )
                     while (!closed) {
                         val line = reader.readLine() ?: break
@@ -215,28 +210,48 @@ class ScrcpySession(
             Log.i(TAG, "Waiting ${SERVER_BOOT_DELAY_MS}ms for server boot...")
             Thread.sleep(SERVER_BOOT_DELAY_MS)
 
-            // Phase 1: Open video socket (first connection gets dummy byte)
             val socketName = socketNameFor(scid.toInt())
-            Log.i(TAG, "Opening video socket: $socketName")
-            val firstStream = openAbstractSocketWithRetry(conn, socketName, expectDummyByte = true)
-            val firstInput = DataInputStream(BufferedInputStream(firstStream.inputStream))
-            videoStream = firstStream
-            videoInput = firstInput
 
-            // Phase 2: Open control socket
+            // Phase 1: Open video socket
+            Log.i(TAG, "Opening video socket: $socketName")
+            videoStream = client.openAbstractSocket(socketName)
+                ?: throw IOException("Failed to open video socket")
+            // The first client to connect gets a dummy byte from the server
+            val dummyByte = videoStream!!.inputStream.read()
+            if (dummyByte < 0) throw IOException("Did not receive dummy byte from server")
+            videoInput = DataInputStream(BufferedInputStream(videoStream!!.inputStream))
+            Log.i(TAG, "Video socket opened")
+
+
+            // Phase 2: Open audio socket (if enabled)
+            if (audioForward) {
+                Log.i(TAG, "Opening audio socket...")
+                audioStream = client.openAbstractSocket(socketName)
+                    ?: throw IOException("Failed to open audio socket")
+                audioInput = DataInputStream(BufferedInputStream(audioStream!!.inputStream))
+                Log.i(TAG, "Audio socket opened")
+            }
+
+            // Phase 3: Open control socket
             Log.i(TAG, "Opening control socket...")
-            val ctrlStream = openAbstractSocketWithRetry(conn, socketName, expectDummyByte = false)
-            controlStream = ctrlStream
-            controlOutput = DataOutputStream(ctrlStream.outputStream)
+            controlStream = client.openAbstractSocket(socketName)
+                ?: throw IOException("Failed to open control socket")
+            controlOutput = DataOutputStream(controlStream!!.outputStream)
             Log.i(TAG, "Control socket opened")
 
-            // Phase 3: Read device name
-            deviceName = readDeviceName(firstInput)
+            // Phase 4: Read device name (from video stream)
+            deviceName = readDeviceName(videoInput!!)
             Log.i(TAG, "Device name: $deviceName")
 
-            // Phase 4: Read video codec ID
-            videoCodecId = firstInput.readInt()
+            // Phase 5: Read video codec ID (from video stream)
+            videoCodecId = videoInput!!.readInt()
             Log.i(TAG, "Video codec ID: 0x${String.format("%x", videoCodecId)}")
+
+            // Phase 6: Read audio codec ID (from audio stream, if enabled)
+            if (audioForward) {
+                audioCodecId = audioInput!!.readInt()
+                Log.i(TAG, "Audio codec ID: 0x${String.format("%x", audioCodecId)}")
+            }
 
             screenWidth = 0
             screenHeight = 0
@@ -310,6 +325,30 @@ class ScrcpySession(
             )
         } catch (e: Exception) {
             if (!closed) Log.e(TAG, "Failed to read video packet", e)
+            return null
+        }
+    }
+
+    fun readAudioPacket(): AudioPacket? {
+        val input = audioInput ?: return null
+        if (closed) return null
+
+        try {
+            val header = ByteArray(12)
+            input.readFully(header)
+
+            val bb = ByteBuffer.wrap(header).order(ByteOrder.BIG_ENDIAN)
+            val pts = bb.long
+            val packetSize = bb.int
+
+            if (packetSize <= 0 || packetSize > 1_000_000) return null
+
+            val data = ByteArray(packetSize)
+            input.readFully(data)
+
+            return AudioPacket(pts, data)
+        } catch (e: Exception) {
+            if (!closed) Log.e(TAG, "Failed to read audio packet", e)
             return null
         }
     }
@@ -517,12 +556,13 @@ class ScrcpySession(
     private fun cleanup() {
         try {
             videoStream?.close()
+            audioStream?.close()
             controlStream?.close()
             serverStream?.close()
-            connection?.close()
         } catch (e: Exception) { Log.w(TAG, "Cleanup error", e) }
-        videoStream = null; controlStream = null; controlOutput = null
-        videoInput = null; serverStream = null; connection = null
+        videoStream = null; audioStream = null; audioInput = null
+        controlStream = null; controlOutput = null
+        videoInput = null; serverStream = null
     }
 
     private fun encodeUnsignedFixedPoint16(value: Float): Int {

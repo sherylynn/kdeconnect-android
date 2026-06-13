@@ -38,6 +38,13 @@
             android:defaultValue="h264"
             app:key="scrcpy_video_codec" />
 
+        <SwitchPreferenceCompat
+            android:key="scrcpy_audio_forward"
+            android:title="音频转发"
+            android:summary="同步转发远程设备的音频"
+            android:defaultValue="true"
+            app:key="scrcpy_audio_forward" />
+
         <EditTextPreference
             android:key="scrcpy_max_size"
             android:title="@string/scrcpy_max_size"
