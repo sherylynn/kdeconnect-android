@@ -23,4 +23,14 @@
         <item>prefer_text</item>
         <item>raw</item>
     </string-array>
+
+    <!-- Scrcpy Launch Mode -->
+    <string-array name="scrcpy_launch_mode_entries">
+        <item>Fullscreen</item>
+        <item>Floating Window</item>
+    </string-array>
+    <string-array name="scrcpy_launch_mode_values">
+        <item>fullscreen</item>
+        <item>floating</item>
+    </string-array>
 </resources>

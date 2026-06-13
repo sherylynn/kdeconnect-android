@@ -7,6 +7,7 @@ package org.kde.kdeconnect.plugins.adbconnection
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -182,14 +183,29 @@ class AdbConnectionPlugin : Plugin() {
 
         val host = getDeviceHost()
         val port = getAdbPort()
+        val launchMode = preferences?.getString("scrcpy_launch_mode", "fullscreen") ?: "fullscreen"
 
-        val intent = Intent(context, ScrcpyActivity::class.java).apply {
-            putExtra(ScrcpyActivity.EXTRA_HOST, host)
-            putExtra(ScrcpyActivity.EXTRA_PORT, port)
-            putExtra(ScrcpyActivity.EXTRA_PREFS_NAME, sharedPreferencesName)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (launchMode == "floating") {
+            val serviceIntent = Intent(context, ScrcpyFloatingService::class.java).apply {
+                action = ScrcpyFloatingService.ACTION_START
+                putExtra(ScrcpyFloatingService.EXTRA_HOST, host)
+                putExtra(ScrcpyFloatingService.EXTRA_PORT, port)
+                putExtra(ScrcpyFloatingService.EXTRA_PREFS_NAME, sharedPreferencesName)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
+        } else {
+            val intent = Intent(context, ScrcpyActivity::class.java).apply {
+                putExtra(ScrcpyActivity.EXTRA_HOST, host)
+                putExtra(ScrcpyActivity.EXTRA_PORT, port)
+                putExtra(ScrcpyActivity.EXTRA_PREFS_NAME, sharedPreferencesName)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
         }
-        context.startActivity(intent)
     }
 
     private fun pushScrcpyServer(): String? {

@@ -116,6 +116,15 @@
             android:defaultValue="false"
             app:key="scrcpy_lock_on_disconnect" />
 
+        <ListPreference
+            android:key="scrcpy_launch_mode"
+            android:title="@string/scrcpy_launch_mode"
+            android:summary="@string/scrcpy_launch_mode_summary"
+            android:entries="@array/scrcpy_launch_mode_entries"
+            android:entryValues="@array/scrcpy_launch_mode_values"
+            android:defaultValue="fullscreen"
+            app:key="scrcpy_launch_mode" />
+
         <EditTextPreference
             android:key="scrcpy_app_stream"
             android:title="应用流转"
