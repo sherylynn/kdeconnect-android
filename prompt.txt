@@ -42,3 +42,4 @@ video codec 是正确显示了我选择的 h.264 但 max size 和 max fps video 
 
 我希望在插件配置中，可以选择配置我点scrcpy时是默认先打开悬浮窗还是打开全屏的activity
 
+学习 /root/ScrcpyForAndroid/ 的音频码率 视频码率的滑动块或者档位的设置，改进我的项目的插件的设置

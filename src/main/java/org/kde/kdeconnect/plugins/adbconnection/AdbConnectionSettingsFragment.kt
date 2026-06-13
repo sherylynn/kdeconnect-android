@@ -27,11 +27,14 @@ class AdbConnectionSettingsFragment : PluginSettingsFragment() {
         // 设置 EditTextPreference 的 SummaryProvider 以显示当前值
         findPreference<EditTextPreference>("scrcpy_max_size")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
         findPreference<EditTextPreference>("scrcpy_max_fps")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
-        findPreference<EditTextPreference>("scrcpy_video_bit_rate")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
         findPreference<EditTextPreference>("scrcpy_app_stream")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
         findPreference<EditTextPreference>("scrcpy_new_display")?.summaryProvider = EditTextPreference.SimpleSummaryProvider.getInstance()
 
         // 设置 ListPreference 的 SummaryProvider 以显示当前选中的条目
+        findPreference<androidx.preference.ListPreference>("scrcpy_video_codec")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
+        findPreference<androidx.preference.ListPreference>("scrcpy_key_inject_mode")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
         findPreference<androidx.preference.ListPreference>("scrcpy_launch_mode")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
+        findPreference<androidx.preference.ListPreference>("scrcpy_video_bit_rate")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
+        findPreference<androidx.preference.ListPreference>("scrcpy_audio_bit_rate")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
     }
 }

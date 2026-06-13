@@ -151,6 +151,7 @@ class ScrcpySession(
             val maxSize = (settings.getString("scrcpy_max_size", "0") ?: "0").toUShortOrNull() ?: 0u
             val maxFps = settings.getString("scrcpy_max_fps", "") ?: ""
             val videoBitRate = (settings.getString("scrcpy_video_bit_rate", "0") ?: "0").toIntOrNull() ?: 0
+            val audioBitRate = (settings.getString("scrcpy_audio_bit_rate", "0") ?: "0").toIntOrNull() ?: 0
             val control = settings.getBoolean("scrcpy_control", true)
             val clipboardSync = settings.getBoolean("scrcpy_clipboard_sync", true)
             val keyInjectMode = ClientOptions.KeyInjectMode.fromString(
@@ -161,7 +162,7 @@ class ScrcpySession(
             val appStream = settings.getString("scrcpy_app_stream", "") ?: ""
             val newDisplay = settings.getString("scrcpy_new_display", "") ?: ""
 
-            Log.i(TAG, "Settings: videoCodec=$videoCodec, audioForward=$audioForward, audioCodec=$audioCodec, maxSize=$maxSize, maxFps=$maxFps, bitRate=$videoBitRate, control=$control, appStream=$appStream, newDisplay=$newDisplay")
+            Log.i(TAG, "Settings: videoCodec=$videoCodec, audioForward=$audioForward, audioCodec=$audioCodec, maxSize=$maxSize, maxFps=$maxFps, videoBitRate=$videoBitRate, audioBitRate=$audioBitRate, control=$control, appStream=$appStream, newDisplay=$newDisplay")
 
             val options = ClientOptions(
                 video = true,
@@ -172,6 +173,7 @@ class ScrcpySession(
                 maxSize = maxSize,
                 maxFps = maxFps,
                 videoBitRate = videoBitRate,
+                audioBitRate = audioBitRate,
                 clipboardAutosync = clipboardSync,
                 keyInjectMode = keyInjectMode,
                 stayAwake = stayAwake,

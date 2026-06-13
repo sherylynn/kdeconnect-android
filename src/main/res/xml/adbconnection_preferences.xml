@@ -63,14 +63,23 @@
             android:inputType="number"
             app:key="scrcpy_max_fps" />
 
-        <EditTextPreference
+        <ListPreference
             android:key="scrcpy_video_bit_rate"
             android:title="@string/scrcpy_video_bit_rate"
-            android:summary="%s bps"
+            android:summary="%s"
+            android:entries="@array/scrcpy_video_bit_rate_entries"
+            android:entryValues="@array/scrcpy_video_bit_rate_values"
             android:defaultValue="0"
-            android:dialogTitle="@string/scrcpy_video_bit_rate_dialog"
-            android:inputType="number"
             app:key="scrcpy_video_bit_rate" />
+
+        <ListPreference
+            android:key="scrcpy_audio_bit_rate"
+            android:title="@string/scrcpy_audio_bit_rate"
+            android:summary="%s"
+            android:entries="@array/scrcpy_audio_bit_rate_entries"
+            android:entryValues="@array/scrcpy_audio_bit_rate_values"
+            android:defaultValue="0"
+            app:key="scrcpy_audio_bit_rate" />
 
         <SwitchPreferenceCompat
             android:key="scrcpy_control"
