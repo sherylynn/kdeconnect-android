@@ -28,7 +28,7 @@
     </FrameLayout>
 
     <!-- Video surface -->
-    <org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputSurfaceView
+    <org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputTextureView
         android:id="@+id/floatingSurfaceView"
         android:layout_width="match_parent"
         android:layout_height="0dp"

@@ -8,28 +8,25 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
-import android.view.SurfaceHolder
 import android.view.View
 import android.view.WindowManager
 import android.widget.EditText
 import android.widget.GridLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.Toast
 import org.kde.kdeconnect_tp.R
-import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputSurfaceView
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputTextureView
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.TouchEventHandler
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
-class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSurfaceView.InputCallbacks {
+class ScrcpyFloatingActivity : Activity(), ScrcpyInputTextureView.InputCallbacks, ScrcpyInputTextureView.SurfaceCallback {
 
     companion object {
         private const val TAG = "ScrcpyFloating"
@@ -38,7 +35,7 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         const val EXTRA_PREFS_NAME = "prefs_name"
     }
 
-    private lateinit var surfaceView: ScrcpyInputSurfaceView
+    private lateinit var surfaceView: ScrcpyInputTextureView
     private lateinit var dragBar: View
     private lateinit var navBar: LinearLayout
     private lateinit var controlBar: GridLayout
@@ -52,7 +49,8 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
     private var decoderConfigured = false
     private var codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
     private val inputBufferQueue = LinkedBlockingQueue<Int>()
-    private val decoderHandler = Handler(Looper.getMainLooper())
+    private var decoderHandlerThread: android.os.HandlerThread? = null
+    private var decoderHandler: Handler? = null
     private var touchEventHandler: TouchEventHandler? = null
     private var host = ""
     private var port = 0
@@ -93,8 +91,8 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         navBar = findViewById(R.id.floatingNavBar)
         controlBar = findViewById(R.id.controlBar)
 
-        surfaceView.holder.addCallback(this)
         surfaceView.inputCallbacks = this
+        surfaceView.surfaceCallback = this
         surfaceView.setCommitTextEnabled(true)
 
         setupFloatingWindow()
@@ -209,16 +207,12 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         }
     }
 
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        surface = holder.surface
+    override fun onSurfaceReady(surface: Surface) {
+        this.surface = surface
         startScrcpy()
     }
 
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        touchEventHandler?.updateDimensions(width, height)
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) { stopScrcpy() }
+    override fun onSurfaceDestroyed() { stopScrcpy() }
 
     override fun handleKeyEvent(event: KeyEvent): Boolean {
         if (!isRunning || event.keyCode == KeyEvent.KEYCODE_BACK) return false
@@ -326,6 +320,8 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
     private fun createDecoder(width: Int, height: Int) {
         releaseDecoder()
         try {
+            decoderHandlerThread = android.os.HandlerThread("floating_decoder").also { it.start() }
+            decoderHandler = Handler(decoderHandlerThread!!.looper)
             val format = MediaFormat.createVideoFormat(codecMime, width, height)
             decoder = MediaCodec.createDecoderByType(codecMime)
             decoder!!.setCallback(decoderCallback, decoderHandler)
@@ -339,6 +335,9 @@ class ScrcpyFloatingActivity : Activity(), SurfaceHolder.Callback, ScrcpyInputSu
         inputBufferQueue.clear()
         try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
         decoder = null; decoderConfigured = false
+        decoderHandlerThread?.quitSafely()
+        decoderHandlerThread = null
+        decoderHandler = null
     }
 
     private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {

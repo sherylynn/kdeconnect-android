@@ -15,29 +15,23 @@ import android.util.Rational
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
-import android.view.SurfaceHolder
 import android.view.View
-import android.widget.Button
 import android.widget.Toast
 import android.widget.GridLayout
-import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import androidx.appcompat.app.AppCompatActivity
 import org.kde.kdeconnect_tp.R
-import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputSurfaceView
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpyInputTextureView
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.TouchEventHandler
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputSurfaceView.InputCallbacks {
+class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallbacks, ScrcpyInputTextureView.SurfaceCallback {
 
-    private lateinit var surfaceView: ScrcpyInputSurfaceView
-    private lateinit var floatingButton: ImageButton
-    private lateinit var floatingMenu: ScrollView
+    private lateinit var surfaceView: ScrcpyInputTextureView
     private lateinit var navBar: LinearLayout
     private lateinit var barView: GridLayout
     private lateinit var buttonMore: ImageView
@@ -51,7 +45,8 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     private var decoderConfigured = false
     private var codecMime = MediaFormat.MIMETYPE_VIDEO_AVC
     private val inputBufferQueue = java.util.concurrent.LinkedBlockingQueue<Int>()
-    private val decoderHandler = Handler(Looper.getMainLooper())
+    private var decoderHandlerThread: android.os.HandlerThread? = null
+    private var decoderHandler: Handler? = null
 
     private var host: String = ""
     private var port: Int = 0
@@ -67,10 +62,8 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_scrcpy)
         surfaceView = findViewById(R.id.surface_view)
-        floatingButton = findViewById(R.id.floating_button)
-        floatingMenu = findViewById(R.id.floating_menu)
-        surfaceView.holder.addCallback(this)
         surfaceView.inputCallbacks = this
+        surfaceView.surfaceCallback = this
         surfaceView.setCommitTextEnabled(true)
 
         host = intent.getStringExtra(EXTRA_HOST) ?: ""
@@ -78,72 +71,6 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         prefsName = intent.getStringExtra(EXTRA_PREFS_NAME) ?: ""
         Log.i(TAG, "onCreate: host=$host, port=$port, prefs=$prefsName")
         if (host.isEmpty() || port == 0) { finish(); return }
-
-        // Floating button setup
-        floatingButton.setOnClickListener {
-            floatingMenu.visibility = if (floatingMenu.visibility == View.VISIBLE) View.GONE else View.VISIBLE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_back).setOnClickListener {
-            scrcpySession?.sendBack(); floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_home).setOnClickListener {
-            scrcpySession?.sendHome(); floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_app_switch).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_power).setOnClickListener {
-            scrcpySession?.lockDevice()
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_volume_up).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_VOLUME_UP)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_VOLUME_UP)
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_volume_down).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_VOLUME_DOWN)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_VOLUME_DOWN)
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_volume_mute).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_VOLUME_MUTE)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_VOLUME_MUTE)
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_menu_key).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_MENU)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_MENU)
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_notification).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_NOTIFICATION)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_NOTIFICATION)
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_screenshot).setOnClickListener {
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_SYSRQ)
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_SYSRQ)
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_rotate).setOnClickListener {
-            scrcpySession?.rotateDevice()
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_expand_notif).setOnClickListener {
-            scrcpySession?.expandNotificationPanel()
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_expand_settings).setOnClickListener {
-            scrcpySession?.expandSettingsPanel()
-            floatingMenu.visibility = View.GONE
-        }
-        floatingMenu.findViewById<Button>(R.id.floating_collapse_panels).setOnClickListener {
-            scrcpySession?.collapsePanels()
-            floatingMenu.visibility = View.GONE
-        }
 
         // Setup new UI elements
         navBar = findViewById(R.id.nav_bar)
@@ -166,9 +93,8 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         )
     }
 
-    override fun surfaceCreated(holder: SurfaceHolder) { surface = holder.surface; startScrcpy() }
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) { touchEventHandler?.updateDimensions(width, height) }
-    override fun surfaceDestroyed(holder: SurfaceHolder) { stopScrcpy() }
+    override fun onSurfaceReady(surface: Surface) { this.surface = surface; startScrcpy() }
+    override fun onSurfaceDestroyed() { stopScrcpy() }
 
     override fun handleKeyEvent(event: KeyEvent): Boolean {
         val session = scrcpySession ?: return false
@@ -186,21 +112,13 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
     }
 
     /**
-     * Intercept touch events. If touch is on floating button/menu, let the normal
+     * Intercept touch events. If touch is on UI elements, let the normal
      * view hierarchy handle it. Otherwise, send to scrcpy session.
      */
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        // Check if touch is on floating button or menu - let them handle it normally
-        if (isTouchOnView(floatingButton, event) || isTouchOnView(floatingMenu, event)) {
-            return super.dispatchTouchEvent(event)
-        }
         // Check if touch is on new UI elements - let them handle it normally
         if (isTouchOnView(navBar, event) || isTouchOnView(buttonMore, event) || isTouchOnView(barView, event)) {
             return super.dispatchTouchEvent(event)
-        }
-        // Hide floating menu when touching elsewhere
-        if (floatingMenu.visibility == View.VISIBLE) {
-            floatingMenu.visibility = View.GONE
         }
         // Hide bar view when touching elsewhere
         if (barView.visibility == View.VISIBLE) {
@@ -379,6 +297,8 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         releaseDecoder()
         try {
             Log.i(TAG, "Creating decoder: ${codecMime} ${width}x${height}")
+            decoderHandlerThread = android.os.HandlerThread("scrcpy_decoder").also { it.start() }
+            decoderHandler = Handler(decoderHandlerThread!!.looper)
             val format = MediaFormat.createVideoFormat(codecMime, width, height)
             decoder = MediaCodec.createDecoderByType(codecMime)
             decoder!!.setCallback(decoderCallback, decoderHandler)
@@ -392,6 +312,9 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         inputBufferQueue.clear()
         try { decoder?.stop(); decoder?.release() } catch (_: Exception) {}
         decoder = null; decoderConfigured = false
+        decoderHandlerThread?.quitSafely()
+        decoderHandlerThread = null
+        decoderHandler = null
     }
 
     private fun feedPacket(data: ByteArray, ptsUs: Long, isConfig: Boolean, isKeyFrame: Boolean) {
@@ -556,8 +479,6 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
             try {
                 enterPictureInPictureMode(params)
                 isInPipMode = true
-                floatingButton.visibility = View.GONE
-                floatingMenu.visibility = View.GONE
                 navBar.visibility = View.GONE
                 barView.visibility = View.GONE
                 buttonMore.visibility = View.GONE
@@ -571,8 +492,6 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
         super.onPictureInPictureModeChanged(isInPictureInPictureMode)
         isInPipMode = isInPictureInPictureMode
         if (isInPictureInPictureMode) {
-            floatingButton.visibility = View.GONE
-            floatingMenu.visibility = View.GONE
             navBar.visibility = View.GONE
             barView.visibility = View.GONE
             buttonMore.visibility = View.GONE
@@ -582,7 +501,6 @@ class ScrcpyActivity : AppCompatActivity(), SurfaceHolder.Callback, ScrcpyInputS
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             )
         } else {
-            floatingButton.visibility = View.VISIBLE
             navBar.visibility = if (isNavBarVisible) View.VISIBLE else View.GONE
             buttonMore.visibility = View.VISIBLE
         }
