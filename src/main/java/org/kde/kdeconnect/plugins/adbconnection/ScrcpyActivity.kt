@@ -339,7 +339,8 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
                 status = 1
 
                 // Start audio thread - like Easycontrol executeStreamInThread
-                if (session.audioCodecId != 0) {
+                // audioCodecId == 0 means disabled, == 1 means server error
+                if (session.audioCodecId != 0 && session.audioCodecId != 1) {
                     audioDecodeThread = Thread({ executeStreamIn(session) }, "scrcpy-audio").also { it.start() }
                 }
 
@@ -427,18 +428,22 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
 
                 if (packet.data.isEmpty()) continue
 
-                // First audio packet is csd0 - like Easycontrol
-                if (audioDecode == null) {
-                    try {
-                        audioDecode = AudioDecode(useOpus, packet.data, handler)
-                        audioDecode?.playAudio(true)
-                        Log.i(TAG, "Audio decoder created, useOpus=$useOpus")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to create audio decoder", e)
+                // Config packet initializes decoder (scrcpy 4.0 audio stream)
+                if (packet.isConfig) {
+                    if (audioDecode == null) {
+                        try {
+                            audioDecode = AudioDecode(useOpus, packet.data, handler)
+                            audioDecode?.playAudio(true)
+                            Log.i(TAG, "Audio decoder created, useOpus=$useOpus, csdSize=${packet.data.size}")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to create audio decoder", e)
+                        }
                     }
-                } else {
-                    audioDecode?.decodeIn(packet.data)
+                    continue
                 }
+
+                // Regular audio frame
+                audioDecode?.decodeIn(packet.data)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Audio stream error", e)

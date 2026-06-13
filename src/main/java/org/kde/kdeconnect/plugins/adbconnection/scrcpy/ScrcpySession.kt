@@ -84,6 +84,7 @@ class ScrcpySession(
 
     data class AudioPacket(
         val ptsUs: Long,
+        val isConfig: Boolean,
         val data: ByteArray,
     )
 
@@ -341,15 +342,18 @@ class ScrcpySession(
             input.readFully(header)
 
             val bb = ByteBuffer.wrap(header).order(ByteOrder.BIG_ENDIAN)
-            val pts = bb.long
+            val ptsAndFlags = bb.long
             val packetSize = bb.int
 
             if (packetSize <= 0 || packetSize > 1_000_000) return null
 
+            val ptsUs = ptsAndFlags and PACKET_PTS_MASK
+            val isConfig = (ptsAndFlags and PACKET_FLAG_CONFIG) != 0L
+
             val data = ByteArray(packetSize)
             input.readFully(data)
 
-            return AudioPacket(pts, data)
+            return AudioPacket(ptsUs, isConfig, data)
         } catch (e: Exception) {
             if (!closed) Log.e(TAG, "Failed to read audio packet", e)
             return null
