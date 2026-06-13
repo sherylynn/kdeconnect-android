@@ -282,69 +282,77 @@ class ScrcpyFloatingService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun setupResizeHandles() {
         val minSize = 150
-
-        // Bottom-right: anchor = top-left corner
-        setupCornerResize(R.id.resize_br, minSize) { ax, ay, rawX, rawY ->
-            layoutParams.width = (rawX - ax).coerceAtLeast(minSize)
-            layoutParams.height = (rawY - ay).coerceAtLeast(minSize)
-        }
-
-        // Top-left: anchor = bottom-right corner
-        setupCornerResize(R.id.resize_tl, minSize) { ax, ay, rawX, rawY ->
-            val newW = (ax - rawX).coerceAtLeast(minSize)
-            val newH = (ay - rawY).coerceAtLeast(minSize)
-            layoutParams.x = ax - newW
-            layoutParams.y = ay - newH
-            layoutParams.width = newW
-            layoutParams.height = newH
-        }
-
-        // Top-right: anchor = bottom-left corner
-        setupCornerResize(R.id.resize_tr, minSize) { ax, ay, rawX, rawY ->
-            val newH = (ay - rawY).coerceAtLeast(minSize)
-            layoutParams.width = (rawX - ax).coerceAtLeast(minSize)
-            layoutParams.y = ay - newH
-            layoutParams.height = newH
-        }
-
-        // Bottom-left: anchor = top-right corner
-        setupCornerResize(R.id.resize_bl, minSize) { ax, ay, rawX, rawY ->
-            val newW = (ax - rawX).coerceAtLeast(minSize)
-            layoutParams.x = ax - newW
-            layoutParams.width = newW
-            layoutParams.height = (rawY - ay).coerceAtLeast(minSize)
-        }
+        setupCornerResize(R.id.resize_br, minSize)
+        setupCornerResize(R.id.resize_tl, minSize)
+        setupCornerResize(R.id.resize_tr, minSize)
+        setupCornerResize(R.id.resize_bl, minSize)
     }
 
-    private fun setupCornerResize(viewId: Int, minSize: Int, onResize: (anchorAbsX: Int, anchorAbsY: Int, rawX: Int, rawY: Int) -> Unit) {
+    private fun setupCornerResize(viewId: Int, minSize: Int) {
         val view = overlayView?.findViewById<View>(viewId) ?: return
 
-        view.setOnTouchListener { v, event ->
-            if (event.action == MotionEvent.ACTION_DOWN) {
-                // Record anchor as absolute screen coordinates of the OPPOSITE corner
-                val loc = IntArray(2)
-                overlayView?.getLocationOnScreen(loc)
-                val ovX = loc[0]
-                val ovY = loc[1]
-                val anchorX: Int
-                val anchorY: Int
-                when (viewId) {
-                    R.id.resize_br -> { anchorX = ovX; anchorY = ovY }
-                    R.id.resize_tl -> { anchorX = ovX + layoutParams.width; anchorY = ovY + layoutParams.height }
-                    R.id.resize_tr -> { anchorX = ovX; anchorY = ovY + layoutParams.height }
-                    R.id.resize_bl -> { anchorX = ovX + layoutParams.width; anchorY = ovY }
-                    else -> { anchorX = ovX; anchorY = ovY }
+        var initialX = 0
+        var initialY = 0
+        var initialW = 0
+        var initialH = 0
+        var initialRawX = 0f
+        var initialRawY = 0f
+
+        view.setOnTouchListener { _, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialX = layoutParams.x
+                    initialY = layoutParams.y
+                    initialW = layoutParams.width
+                    initialH = layoutParams.height
+                    initialRawX = event.rawX
+                    initialRawY = event.rawY
+                    true
                 }
-                v.tag = intArrayOf(anchorX, anchorY)
-                true
-            } else if (event.action == MotionEvent.ACTION_MOVE) {
-                val anchor = v.tag as? IntArray ?: return@setOnTouchListener false
-                onResize(anchor[0], anchor[1], event.rawX.toInt(), event.rawY.toInt())
-                mainHandler.post {
+                MotionEvent.ACTION_MOVE -> {
+                    val deltaX = event.rawX - initialRawX
+                    val deltaY = event.rawY - initialRawY
+
+                    when (viewId) {
+                        R.id.resize_br -> {
+                            layoutParams.width = (initialW + deltaX).toInt().coerceAtLeast(minSize)
+                            layoutParams.height = (initialH + deltaY).toInt().coerceAtLeast(minSize)
+                        }
+                        R.id.resize_bl -> {
+                            val newW = (initialW - deltaX).toInt()
+                            if (newW >= minSize) {
+                                layoutParams.x = (initialX + deltaX).toInt()
+                                layoutParams.width = newW
+                            }
+                            layoutParams.height = (initialH + deltaY).toInt().coerceAtLeast(minSize)
+                        }
+                        R.id.resize_tr -> {
+                            layoutParams.width = (initialW + deltaX).toInt().coerceAtLeast(minSize)
+                            val newH = (initialH - deltaY).toInt()
+                            if (newH >= minSize) {
+                                layoutParams.y = (initialY + deltaY).toInt()
+                                layoutParams.height = newH
+                            }
+                        }
+                        R.id.resize_tl -> {
+                            val newW = (initialW - deltaX).toInt()
+                            if (newW >= minSize) {
+                                layoutParams.x = (initialX + deltaX).toInt()
+                                layoutParams.width = newW
+                            }
+                            val newH = (initialH - deltaY).toInt()
+                            if (newH >= minSize) {
+                                layoutParams.y = (initialY + deltaY).toInt()
+                                layoutParams.height = newH
+                            }
+                        }
+                    }
+
                     try { windowManager?.updateViewLayout(overlayView, layoutParams) } catch (_: Exception) {}
+                    true
                 }
-                true
-            } else false
+                else -> false
+            }
         }
     }
 
