@@ -18,6 +18,7 @@ import android.util.Log
 import android.view.*
 import android.widget.ImageView
 import org.kde.kdeconnect_tp.R
+import org.kde.kdeconnect.plugins.adbconnection.scrcpy.AudioDecode
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.VideoDecode
 
@@ -49,9 +50,13 @@ class ScrcpyFloatingService : Service() {
     // Status management - like Easycontrol Client
     private var status = 0 // 0: initial, 1: running, -1: stopped
     private var videoDecodeThread: Thread? = null
+    private var audioDecodeThread: Thread? = null
     private var keepAliveThread: Thread? = null
     private var lastKeepAliveTime = 0L
     private val timeoutDelay = 5000L
+
+    // Audio decoder
+    private var audioDecode: AudioDecode? = null
 
     private var screenWidth = 0
     private var screenHeight = 0
@@ -371,6 +376,11 @@ class ScrcpyFloatingService : Service() {
                 // Set status to running
                 status = 1
 
+                // Start audio thread
+                if (session.audioCodecId != 0 && session.audioCodecId != 1) {
+                    audioDecodeThread = Thread({ executeStreamIn(session) }, "floating-audio").also { it.start() }
+                }
+
                 // Start video thread
                 videoDecodeThread = Thread({ executeStreamVideo(session) }, "floating-video").also { it.start() }
 
@@ -379,6 +389,38 @@ class ScrcpyFloatingService : Service() {
                 stopSelf()
             }
         }.start()
+    }
+
+    // ============ Audio stream - like Easycontrol executeStreamIn ============
+
+    private fun executeStreamIn(session: ScrcpySession) {
+        try {
+            val useOpus = session.audioCodecId == 0x6f707573 // "opus"
+
+            while (!Thread.interrupted()) {
+                val packet = session.readAudioPacket() ?: break
+                lastKeepAliveTime = System.currentTimeMillis()
+
+                if (packet.data.isEmpty()) continue
+
+                if (packet.isConfig) {
+                    if (audioDecode == null) {
+                        try {
+                            audioDecode = AudioDecode(useOpus, packet.data, handler)
+                            audioDecode?.playAudio(true)
+                            Log.i(TAG, "Audio decoder created, useOpus=$useOpus, csdSize=${packet.data.size}")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to create audio decoder", e)
+                        }
+                    }
+                    continue
+                }
+
+                audioDecode?.decodeIn(packet.data)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Audio stream error", e)
+        }
     }
 
     // ============ Video stream - like Easycontrol executeStreamVideo ============
@@ -438,15 +480,17 @@ class ScrcpyFloatingService : Service() {
         if (status == -1) return
         status = -1
 
-        for (i in 0..4) {
+        for (i in 0..6) {
             try {
                 when (i) {
                     0 -> {
                         keepAliveThread?.interrupt()
+                        audioDecodeThread?.interrupt()
                         videoDecodeThread?.interrupt()
                     }
                     1 -> {
                         keepAliveThread?.join(500)
+                        audioDecodeThread?.join(500)
                         videoDecodeThread?.join(500)
                     }
                     2 -> {
@@ -454,10 +498,14 @@ class ScrcpyFloatingService : Service() {
                         videoDecode = null
                     }
                     3 -> {
+                        audioDecode?.release()
+                        audioDecode = null
+                    }
+                    4 -> {
                         scrcpySession?.stop()
                         scrcpySession = null
                     }
-                    4 -> {
+                    5 -> {
                         handlerThread?.quitSafely()
                         handlerThread = null
                         handler = null
