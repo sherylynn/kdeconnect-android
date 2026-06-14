@@ -63,6 +63,8 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="adb_port_dialog">Enter ADB Port</string>
     <string name="adb_auto_connect">Auto Connect</string>
     <string name="adb_auto_connect_summary">Automatically connect when device is found</string>
+    <string name="adb_reconnect_delay">Reconnect Delay</string>
+    <string name="adb_reconnect_delay_summary">Delay before auto reconnect when disconnected</string>
     <string name="adb_host_hint">Host IP</string>
     <string name="adb_port_hint">Port</string>
     <string name="adb_command_hint">Enter command</string>

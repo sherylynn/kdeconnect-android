@@ -162,11 +162,18 @@ class AdbConnectionPlugin : Plugin() {
     private fun scheduleReconnect() {
         if (reconnecting) return
         reconnecting = true
+        val delayMs = preferences?.getString("adb_reconnect_delay", "5000")?.toLongOrNull() ?: 5000L
+        val delayText = when (delayMs) {
+            500L -> "0.5s"
+            1000L -> "1s"
+            2000L -> "2s"
+            else -> "5s"
+        }
         mainHandler.post {
-            Toast.makeText(context, "ADB disconnected, reconnecting in 5s...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "ADB disconnected, reconnecting in $delayText...", Toast.LENGTH_SHORT).show()
         }
         Thread {
-            Thread.sleep(5000)
+            Thread.sleep(delayMs)
             reconnecting = false
             if (adbClient == null && preferences?.getBoolean("auto_connect", false) == true) {
                 connectToDevice()

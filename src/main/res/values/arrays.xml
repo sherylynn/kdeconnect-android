@@ -89,4 +89,18 @@
         <item>384000</item>
         <item>512000</item>
     </string-array>
+
+    <!-- ADB Reconnect Delay -->
+    <string-array name="adb_reconnect_delay_entries">
+        <item>0.5 seconds</item>
+        <item>1 second</item>
+        <item>2 seconds</item>
+        <item>5 seconds</item>
+    </string-array>
+    <string-array name="adb_reconnect_delay_values">
+        <item>500</item>
+        <item>1000</item>
+        <item>2000</item>
+        <item>5000</item>
+    </string-array>
 </resources>

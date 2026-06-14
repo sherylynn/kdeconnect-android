@@ -26,6 +26,15 @@
         android:defaultValue="false"
         app:key="auto_connect" />
 
+    <ListPreference
+        android:key="adb_reconnect_delay"
+        android:title="@string/adb_reconnect_delay"
+        android:summary="@string/adb_reconnect_delay_summary"
+        android:entries="@array/adb_reconnect_delay_entries"
+        android:entryValues="@array/adb_reconnect_delay_values"
+        android:defaultValue="5000"
+        app:key="adb_reconnect_delay" />
+
     <PreferenceCategory
         android:title="@string/scrcpy_settings_category">
 

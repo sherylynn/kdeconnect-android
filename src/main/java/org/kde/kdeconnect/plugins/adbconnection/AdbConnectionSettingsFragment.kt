@@ -36,5 +36,6 @@ class AdbConnectionSettingsFragment : PluginSettingsFragment() {
         findPreference<androidx.preference.ListPreference>("scrcpy_launch_mode")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
         findPreference<androidx.preference.ListPreference>("scrcpy_video_bit_rate")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
         findPreference<androidx.preference.ListPreference>("scrcpy_audio_bit_rate")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
+        findPreference<androidx.preference.ListPreference>("adb_reconnect_delay")?.summaryProvider = androidx.preference.ListPreference.SimpleSummaryProvider.getInstance()
     }
 }
