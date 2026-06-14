@@ -43,3 +43,7 @@ video codec 是正确显示了我选择的 h.264 但 max size 和 max fps video 
 我希望在插件配置中，可以选择配置我点scrcpy时是默认先打开悬浮窗还是打开全屏的activity
 
 学习 /root/ScrcpyForAndroid/ 的音频码率 视频码率的滑动块或者档位的设置，改进我的项目的插件的设置
+为什么我连不上锁屏时候的设备，而scrcpyforandroid 就能连上锁屏时候的设备
+第一次连锁屏的设备，还是连不上，我解锁设备，又点disconnect，再连连上了，但是断开再连，就一直闪退，你可以看看日志
+
+既然我勾选了 adb 插件设置的 auto connect； 现在点scrcpy的时候会提示我 adb not connected 那为什么不直接继续在后台帮我练好adb connect并在scrcpy意外断开的时候尝试重连呢，你想想这个 auto connect有没有更全面的考虑机制

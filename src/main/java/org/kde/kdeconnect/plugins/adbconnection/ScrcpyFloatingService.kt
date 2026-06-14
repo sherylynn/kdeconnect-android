@@ -346,6 +346,11 @@ class ScrcpyFloatingService : Service() {
                     stopSelf()
                     return@Thread
                 }
+                if (!client.isConnected) {
+                    Log.e(TAG, "ADB client is disconnected")
+                    stopSelf()
+                    return@Thread
+                }
                 val session = ScrcpySession(client, this, prefsName)
                 if (!session.start()) { stopSelf(); return@Thread }
                 scrcpySession = session

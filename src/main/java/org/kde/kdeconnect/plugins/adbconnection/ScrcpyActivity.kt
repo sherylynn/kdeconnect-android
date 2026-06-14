@@ -277,6 +277,14 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
                     }
                     return@Thread
                 }
+                if (!client.isConnected) {
+                    Log.e(TAG, "ADB client is disconnected")
+                    runOnUiThread {
+                        Toast.makeText(this, "ADB client is disconnected", Toast.LENGTH_SHORT).show()
+                        finish()
+                    }
+                    return@Thread
+                }
 
                 val session = ScrcpySession(client, this@ScrcpyActivity, prefsName)
                 if (!session.start()) {

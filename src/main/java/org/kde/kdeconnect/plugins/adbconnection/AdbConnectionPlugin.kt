@@ -93,6 +93,9 @@ class AdbConnectionPlugin : Plugin() {
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingScrcpyLaunch = false
+    private var autoRelaunchScrcpyOnReconnect = false
+    private var reconnecting = false
 
     fun connectToDevice() {
         if (!isDeviceInitialized) return
@@ -114,20 +117,41 @@ class AdbConnectionPlugin : Plugin() {
                 if (connected) {
                     adbClient = client
                     sharedAdbClient = client
+
+                    // Set up disconnect callback for auto-reconnect
+                    client.onDisconnect = {
+                        mainHandler.post {
+                            adbClient = null
+                            sharedAdbClient = null
+                            if (isDeviceInitialized) device.reloadPluginsFromSettings()
+                            if (preferences?.getBoolean("auto_connect", false) == true) {
+                                scheduleReconnect()
+                            }
+                        }
+                    }
+
                     Log.i(LOG_TAG, "ADB connected successfully")
                     mainHandler.post {
                         Toast.makeText(context, "ADB connected!", Toast.LENGTH_SHORT).show()
                         if (isDeviceInitialized) device.reloadPluginsFromSettings()
+
+                        // If scrcpy was requested while connecting, launch it now
+                        if (pendingScrcpyLaunch || autoRelaunchScrcpyOnReconnect) {
+                            pendingScrcpyLaunch = false
+                            startScrcpy()
+                        }
                     }
                 } else {
                     Log.e(LOG_TAG, "ADB connection failed")
                     client.close()
+                    pendingScrcpyLaunch = false
                     mainHandler.post {
                         Toast.makeText(context, "ADB connection failed", Toast.LENGTH_SHORT).show()
                     }
                 }
             } catch (e: Exception) {
                 Log.e(LOG_TAG, "ADB connection error", e)
+                pendingScrcpyLaunch = false
                 mainHandler.post {
                     Toast.makeText(context, "ADB error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
@@ -135,7 +159,24 @@ class AdbConnectionPlugin : Plugin() {
         }.start()
     }
 
+    private fun scheduleReconnect() {
+        if (reconnecting) return
+        reconnecting = true
+        mainHandler.post {
+            Toast.makeText(context, "ADB disconnected, reconnecting in 5s...", Toast.LENGTH_SHORT).show()
+        }
+        Thread {
+            Thread.sleep(5000)
+            reconnecting = false
+            if (adbClient == null && preferences?.getBoolean("auto_connect", false) == true) {
+                connectToDevice()
+            }
+        }.start()
+    }
+
     fun disconnect() {
+        pendingScrcpyLaunch = false
+        autoRelaunchScrcpyOnReconnect = false
         adbClient?.close()
         adbClient = null
         sharedAdbClient = null
@@ -160,12 +201,20 @@ class AdbConnectionPlugin : Plugin() {
     fun getAdbClient(): SimpleAdbClient? = adbClient
 
     private fun startScrcpy() {
-        if (!isDeviceInitialized || adbClient?.isConnected != true) {
-            mainHandler.post {
-                Toast.makeText(context, "ADB not connected", Toast.LENGTH_SHORT).show()
+        if (!isDeviceInitialized) return
+        if (adbClient?.isConnected != true) {
+            if (preferences?.getBoolean("auto_connect", false) == true) {
+                pendingScrcpyLaunch = true
+                autoRelaunchScrcpyOnReconnect = true
+                connectToDevice()
+            } else {
+                mainHandler.post {
+                    Toast.makeText(context, "ADB not connected", Toast.LENGTH_SHORT).show()
+                }
             }
             return
         }
+        autoRelaunchScrcpyOnReconnect = true
 
         val host = getDeviceHost()
         val port = getAdbPort()

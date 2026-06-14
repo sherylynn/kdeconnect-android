@@ -23,7 +23,9 @@ class ScrcpySession(
         private const val SERVER_VERSION = "4.0"
         private const val SERVER_ASSET = "bin/scrcpy-server-v4.0"
         private const val SERVER_REMOTE_PATH = "/data/local/tmp/scrcpy-server.jar"
-        private const val SERVER_BOOT_DELAY_MS = 500L
+        private const val SERVER_BOOT_DELAY_MS = 200L
+        private const val CONNECT_RETRY_COUNT = 100
+        private const val CONNECT_RETRY_DELAY_MS = 100L
         private const val DEVICE_NAME_FIELD_LENGTH = 64
 
         private const val PACKET_FLAG_SESSION = 1L shl 63
@@ -112,6 +114,28 @@ class ScrcpySession(
             Log.e(TAG, "Failed to extract and push server", e)
             return false
         }
+    }
+
+    private fun openAbstractSocketWithRetry(socketName: String, expectDummyByte: Boolean = false): SimpleAdbClient.AdbStream {
+        var lastEx: Exception? = null
+        repeat(CONNECT_RETRY_COUNT) { attempt ->
+            try {
+                val stream = client.openAbstractSocket(socketName)
+                    ?: throw IOException("openAbstractSocket returned null")
+                if (expectDummyByte) {
+                    val value = stream.inputStream.read()
+                    if (value < 0) {
+                        stream.close()
+                        throw IOException("scrcpy dummy byte missing")
+                    }
+                }
+                return stream
+            } catch (e: Exception) {
+                lastEx = e
+                if (attempt < CONNECT_RETRY_COUNT - 1) Thread.sleep(CONNECT_RETRY_DELAY_MS)
+            }
+        }
+        throw IOException("Unable to open scrcpy socket '$socketName'", lastEx)
     }
 
     private fun readDeviceName(input: DataInputStream): String {
@@ -215,30 +239,23 @@ class ScrcpySession(
 
             val socketName = socketNameFor(scid.toInt())
 
-            // Phase 1: Open video socket
+            // Phase 1: Open video socket (first connection gets dummy byte in v4.0)
             Log.i(TAG, "Opening video socket: $socketName")
-            videoStream = client.openAbstractSocket(socketName)
-                ?: throw IOException("Failed to open video socket")
-            // The first client to connect gets a dummy byte from the server
-            val dummyByte = videoStream!!.inputStream.read()
-            if (dummyByte < 0) throw IOException("Did not receive dummy byte from server")
+            videoStream = openAbstractSocketWithRetry(socketName, expectDummyByte = true)
             videoInput = DataInputStream(BufferedInputStream(videoStream!!.inputStream))
             Log.i(TAG, "Video socket opened")
-
 
             // Phase 2: Open audio socket (if enabled)
             if (audioForward) {
                 Log.i(TAG, "Opening audio socket...")
-                audioStream = client.openAbstractSocket(socketName)
-                    ?: throw IOException("Failed to open audio socket")
+                audioStream = openAbstractSocketWithRetry(socketName, expectDummyByte = false)
                 audioInput = DataInputStream(BufferedInputStream(audioStream!!.inputStream))
                 Log.i(TAG, "Audio socket opened")
             }
 
             // Phase 3: Open control socket
             Log.i(TAG, "Opening control socket...")
-            controlStream = client.openAbstractSocket(socketName)
-                ?: throw IOException("Failed to open control socket")
+            controlStream = openAbstractSocketWithRetry(socketName, expectDummyByte = false)
             controlOutput = DataOutputStream(controlStream!!.outputStream)
             Log.i(TAG, "Control socket opened")
 

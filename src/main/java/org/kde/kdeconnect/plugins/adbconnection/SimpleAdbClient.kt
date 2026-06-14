@@ -59,6 +59,8 @@ class SimpleAdbClient(
     var isConnected: Boolean = false
         private set
 
+    var onDisconnect: (() -> Unit)? = null
+
     companion object {
         private const val TAG = "SimpleAdbClient"
         private const val A_CNXN = 0x4e584e43
@@ -315,7 +317,9 @@ class SimpleAdbClient(
             if (!closed) {
                 Log.e(TAG, "readLoop exception", e)
                 closed = true
+                isConnected = false
                 streams.values.forEach { it.forceClose() }
+                try { onDisconnect?.invoke() } catch (_: Exception) {}
             }
         }
     }
@@ -473,14 +477,20 @@ class SimpleAdbClient(
 
     @Synchronized
     private fun sendMsg(command: Int, arg0: Int = 0, arg1: Int = 0, data: ByteArray = ByteArray(0)) {
-        val crc = data.fold(0L) { acc, b -> acc + (b.toLong() and 0xFF) }.toInt()
-        val header = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN)
-            .putInt(command).putInt(arg0).putInt(arg1)
-            .putInt(data.size).putInt(crc).putInt(command xor -1)
-            .array()
-        rawOut!!.write(header)
-        if (data.isNotEmpty()) rawOut!!.write(data)
-        rawOut!!.flush()
+        try {
+            val crc = data.fold(0L) { acc, b -> acc + (b.toLong() and 0xFF) }.toInt()
+            val header = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN)
+                .putInt(command).putInt(arg0).putInt(arg1)
+                .putInt(data.size).putInt(crc).putInt(command xor -1)
+                .array()
+            rawOut!!.write(header)
+            if (data.isNotEmpty()) rawOut!!.write(data)
+            rawOut!!.flush()
+        } catch (e: Exception) {
+            isConnected = false
+            try { onDisconnect?.invoke() } catch (_: Exception) {}
+            throw e
+        }
     }
 
     private fun recvMsg(): AdbMsg {
