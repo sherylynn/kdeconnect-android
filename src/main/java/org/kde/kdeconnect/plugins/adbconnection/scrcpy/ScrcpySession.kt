@@ -548,18 +548,6 @@ class ScrcpySession(
         }
     }
 
-    fun rotateDevice() {
-        val output = controlOutput ?: return
-        try {
-            synchronized(output) {
-                output.writeByte(TYPE_ROTATE_DEVICE)
-                output.flush()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "rotateDevice failed", e)
-        }
-    }
-
     fun setClipboard(text: String, paste: Boolean) {
         val output = controlOutput ?: return
         try {

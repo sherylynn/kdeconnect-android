@@ -44,15 +44,6 @@
       android:paddingStart="10dp">
 
       <ImageView
-        android:id="@+id/button_rotate"
-        android:layout_width="40dp"
-        android:layout_height="match_parent"
-        android:focusable="false"
-        android:padding="4dp"
-        android:src="@drawable/rotate"
-        android:tint="#DEDEDE" />
-
-      <ImageView
         android:id="@+id/button_switch"
         android:layout_width="0dp"
         android:layout_height="match_parent"

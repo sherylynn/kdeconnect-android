@@ -295,10 +295,6 @@ class ScrcpySessionService : Service() {
         session?.lockDevice()
     }
 
-    fun rotateDevice() {
-        session?.rotateDevice()
-    }
-
     fun expandNotificationPanel() {
         session?.expandNotificationPanel()
     }

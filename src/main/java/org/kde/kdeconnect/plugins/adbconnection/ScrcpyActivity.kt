@@ -235,10 +235,6 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
     }
 
     private fun setupBottomNavBar() {
-        findViewById<ImageView>(R.id.button_rotate).setOnClickListener {
-            sessionService?.rotateDevice()
-            resetBarViewTimer()
-        }
         findViewById<ImageView>(R.id.button_switch).setOnClickListener {
             sessionService?.sendAppSwitch()
             resetBarViewTimer()

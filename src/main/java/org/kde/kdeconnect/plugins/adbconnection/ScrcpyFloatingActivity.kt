@@ -181,9 +181,6 @@ class ScrcpyFloatingActivity : Activity(), ScrcpyInputTextureView.InputCallbacks
             scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
             scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
         }
-        findViewById<ImageView>(R.id.btnRotate).setOnClickListener {
-            scrcpySession?.rotateDevice()
-        }
         findViewById<ImageView>(R.id.btnPower).setOnClickListener {
             scrcpySession?.lockDevice()
         }
