@@ -42,6 +42,16 @@ class VideoDecode(
         decodec = createDecoder(videoSize, surface, csd0, csd1, handler, videoCodecId)
     }
 
+    fun setSurface(surface: Surface?) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && surface != null) {
+                decodec.setOutputSurface(surface)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VideoDecode", "setOutputSurface failed", e)
+        }
+    }
+
     fun release() {
         try {
             decodec.stop()

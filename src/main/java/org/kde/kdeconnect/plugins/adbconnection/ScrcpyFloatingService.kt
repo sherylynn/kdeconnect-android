@@ -5,12 +5,13 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
+import android.content.ServiceConnection
 import android.graphics.PixelFormat
 import android.graphics.SurfaceTexture
 import android.os.Build
 import android.os.Handler
-import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.util.DisplayMetrics
@@ -18,10 +19,11 @@ import android.util.Log
 import android.view.*
 import android.widget.ImageView
 import org.kde.kdeconnect_tp.R
-import org.kde.kdeconnect.plugins.adbconnection.scrcpy.AudioDecode
-import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
-import org.kde.kdeconnect.plugins.adbconnection.scrcpy.VideoDecode
 
+/**
+ * Scrcpy floating window service - UI layer only.
+ * The actual scrcpy session runs in ScrcpySessionService.
+ */
 class ScrcpyFloatingService : Service() {
 
     companion object {
@@ -40,24 +42,8 @@ class ScrcpyFloatingService : Service() {
     private var textureView: TextureView? = null
     private var surfaceTexture: SurfaceTexture? = null
     private var surface: Surface? = null
-    private var scrcpySession: ScrcpySession? = null
 
-    // Decoder - like Easycontrol
-    private var handlerThread: HandlerThread? = null
-    private var handler: Handler? = null
-    private var videoDecode: VideoDecode? = null
-
-    // Status management - like Easycontrol Client
-    private var status = 0 // 0: initial, 1: running, -1: stopped
-    private var videoDecodeThread: Thread? = null
-    private var audioDecodeThread: Thread? = null
-    private var keepAliveThread: Thread? = null
-    private var lastKeepAliveTime = 0L
-    private val timeoutDelay = 5000L
-
-    // Audio decoder
-    private var audioDecode: AudioDecode? = null
-
+    private var status = 0
     private var screenWidth = 0
     private var screenHeight = 0
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -68,6 +54,51 @@ class ScrcpyFloatingService : Service() {
     private var host = ""
     private var port = 0
     private var prefsName = ""
+
+    // Service connection
+    private var sessionService: ScrcpySessionService? = null
+    private var serviceBound = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as ScrcpySessionService.LocalBinder
+            sessionService = binder.getService()
+            serviceBound = true
+
+            sessionService?.onScreenSizeChanged = { w, h ->
+                screenWidth = w
+                screenHeight = h
+                mainHandler.post { updateOverlaySize() }
+            }
+
+            sessionService?.onStatusChanged = { s ->
+                status = s
+            }
+
+            sessionService?.onError = { error ->
+                Log.e(TAG, "Session error: $error")
+                mainHandler.post { release(); stopSelf() }
+            }
+
+            // Set surface if already ready
+            if (surfaceReady && surface != null) {
+                sessionService?.setSurface(surface)
+            }
+
+            // Update dimensions from service
+            val (sw, sh) = sessionService?.getScreenSize() ?: Pair(0, 0)
+            if (sw > 0 && sh > 0) {
+                screenWidth = sw
+                screenHeight = sh
+                updateOverlaySize()
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            sessionService = null
+            serviceBound = false
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -80,6 +111,7 @@ class ScrcpyFloatingService : Service() {
                 if (host.isEmpty() || port == 0) { stopSelf(); return START_NOT_STICKY }
                 startForeground(NOTIFICATION_ID, buildNotification())
                 showOverlay()
+                startAndBindSessionService()
             }
             ACTION_STOP -> {
                 release()
@@ -88,6 +120,21 @@ class ScrcpyFloatingService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    private fun startAndBindSessionService() {
+        val serviceIntent = Intent(this, ScrcpySessionService::class.java).apply {
+            action = ScrcpySessionService.ACTION_START
+            putExtra(ScrcpySessionService.EXTRA_HOST, host)
+            putExtra(ScrcpySessionService.EXTRA_PORT, port)
+            putExtra(ScrcpySessionService.EXTRA_PREFS_NAME, prefsName)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+        bindService(serviceIntent, serviceConnection, BIND_AUTO_CREATE)
     }
 
     private fun buildNotification(): Notification {
@@ -153,19 +200,23 @@ class ScrcpyFloatingService : Service() {
                 surfaceTexture = st
                 surface = Surface(st)
                 surfaceReady = true
-                startScrcpy()
+                sessionService?.setSurface(surface)
             }
             override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
                 if (screenWidth > 0 && screenHeight > 0) {
                     st.setDefaultBufferSize(screenWidth, screenHeight)
                 }
             }
-            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean = false
+            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                sessionService?.setSurface(null)
+                surface = null
+                surfaceReady = false
+                return false
+            }
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
 
         tv.setOnTouchListener { view, event ->
-            val session = scrcpySession ?: return@setOnTouchListener false
             if (status != 1) return@setOnTouchListener false
             val w = view.width; val h = view.height
             if (w <= 0 || h <= 0) return@setOnTouchListener false
@@ -195,7 +246,7 @@ class ScrcpyFloatingService : Service() {
                 }
                 val devX = (x * (screenWidth - 1).coerceAtLeast(0)).toInt().coerceIn(0, screenWidth - 1)
                 val devY = (y * (screenHeight - 1).coerceAtLeast(0)).toInt().coerceIn(0, screenHeight - 1)
-                session.sendTouchEvent(scrcpyAction, pointerId.toLong(), devX, devY, screenWidth, screenHeight, 1f, 0, 0)
+                sessionService?.sendTouchEvent(scrcpyAction, pointerId.toLong(), devX, devY, screenWidth, screenHeight, 1f, 0, 0)
             }
             true
         }
@@ -234,16 +285,16 @@ class ScrcpyFloatingService : Service() {
 
     private fun setupControlBar() {
         overlayView?.findViewById<ImageView>(R.id.floating_btn_back)?.setOnClickListener {
-            scrcpySession?.sendBack()
+            sessionService?.sendBack()
         }
         overlayView?.findViewById<ImageView>(R.id.floating_btn_home)?.setOnClickListener {
-            scrcpySession?.sendHome()
+            sessionService?.sendHome()
         }
         overlayView?.findViewById<ImageView>(R.id.floating_btn_switch)?.setOnClickListener {
-            scrcpySession?.sendKeyEvent(0, KeyEvent.KEYCODE_APP_SWITCH)
-            scrcpySession?.sendKeyEvent(1, KeyEvent.KEYCODE_APP_SWITCH)
+            sessionService?.sendAppSwitch()
         }
         overlayView?.findViewById<ImageView>(R.id.floating_btn_fullscreen)?.setOnClickListener {
+            sessionService?.setSurface(null)
             val intent = Intent(this, ScrcpyActivity::class.java).apply {
                 putExtra(ScrcpyActivity.EXTRA_HOST, host)
                 putExtra(ScrcpyActivity.EXTRA_PORT, port)
@@ -251,10 +302,15 @@ class ScrcpyFloatingService : Service() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(intent)
-            release(); hideOverlay(); stopSelf()
+            release()
+            hideOverlay()
+            stopSelf()
         }
         overlayView?.findViewById<ImageView>(R.id.floating_btn_close)?.setOnClickListener {
-            release(); hideOverlay(); stopSelf()
+            sessionService?.release()
+            release()
+            hideOverlay()
+            stopSelf()
         }
     }
 
@@ -335,192 +391,13 @@ class ScrcpyFloatingService : Service() {
         }
     }
 
-    // ============ Core: startScrcpy - like Easycontrol Client ============
-
-    private fun startScrcpy() {
-        if (status == 1) return
-        Thread {
-            try {
-                val client = AdbConnectionPlugin.sharedAdbClient ?: run {
-                    Log.e(TAG, "ADB client not available")
-                    stopSelf()
-                    return@Thread
-                }
-                if (!client.isConnected) {
-                    Log.e(TAG, "ADB client is disconnected")
-                    stopSelf()
-                    return@Thread
-                }
-                val session = ScrcpySession(client, this, prefsName)
-                if (!session.start()) { stopSelf(); return@Thread }
-                scrcpySession = session
-                screenWidth = session.screenWidth.takeIf { it > 0 } ?: 0
-                screenHeight = session.screenHeight.takeIf { it > 0 } ?: 0
-                mainHandler.post { updateOverlaySize() }
-
-                // Create handler thread for MediaCodec
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    handlerThread = HandlerThread("floating_mediacodec")
-                    handlerThread?.start()
-                    handler = Handler(handlerThread!!.looper)
-                }
-
-                // Start keep-alive thread
-                lastKeepAliveTime = System.currentTimeMillis()
-                keepAliveThread = Thread({
-                    while (status != -1) {
-                        if (System.currentTimeMillis() - lastKeepAliveTime > timeoutDelay) {
-                            Log.e(TAG, "Keep-alive timeout")
-                            release(); stopSelf()
-                            break
-                        }
-                        try { Thread.sleep(1500) } catch (_: InterruptedException) { break }
-                    }
-                }, "floating-keepalive").also { it.start() }
-
-                // Set status to running
-                status = 1
-
-                // Start audio thread
-                if (session.audioCodecId != 0 && session.audioCodecId != 1) {
-                    audioDecodeThread = Thread({ executeStreamIn(session) }, "floating-audio").also { it.start() }
-                }
-
-                // Start video thread
-                videoDecodeThread = Thread({ executeStreamVideo(session) }, "floating-video").also { it.start() }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "scrcpy failed", e)
-                stopSelf()
-            }
-        }.start()
-    }
-
-    // ============ Audio stream - like Easycontrol executeStreamIn ============
-
-    private fun executeStreamIn(session: ScrcpySession) {
-        try {
-            val useOpus = session.audioCodecId == 0x6f707573 // "opus"
-
-            while (!Thread.interrupted()) {
-                val packet = session.readAudioPacket() ?: break
-                lastKeepAliveTime = System.currentTimeMillis()
-
-                if (packet.data.isEmpty()) continue
-
-                if (packet.isConfig) {
-                    if (audioDecode == null) {
-                        try {
-                            audioDecode = AudioDecode(useOpus, packet.data, handler)
-                            audioDecode?.playAudio(true)
-                            Log.i(TAG, "Audio decoder created, useOpus=$useOpus, csdSize=${packet.data.size}")
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to create audio decoder", e)
-                        }
-                    }
-                    continue
-                }
-
-                audioDecode?.decodeIn(packet.data)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Audio stream error", e)
-        }
-    }
-
-    // ============ Video stream - like Easycontrol executeStreamVideo ============
-
-    private fun executeStreamVideo(session: ScrcpySession) {
-        try {
-            var csd0: Pair<ByteArray, Long>? = null
-            var csd1: Pair<ByteArray, Long>? = null
-
-            while (!Thread.interrupted()) {
-                val packet = session.readVideoPacket() ?: break
-                lastKeepAliveTime = System.currentTimeMillis()
-
-                if (packet.isSession) {
-                    if (packet.width > 0 && packet.height > 0) {
-                        screenWidth = packet.width
-                        screenHeight = packet.height
-                        mainHandler.post { updateOverlaySize() }
-                    }
-                    continue
-                }
-
-                if (packet.data.isEmpty()) continue
-
-                if (packet.isConfig) {
-                    if (csd0 == null) {
-                        csd0 = Pair(packet.data.clone(), packet.ptsUs)
-                    } else if (csd1 == null) {
-                        csd1 = Pair(packet.data.clone(), packet.ptsUs)
-                    }
-                }
-
-                if (videoDecode == null && csd0 != null && screenWidth > 0 && screenHeight > 0) {
-                    val sur = surface ?: continue
-                    videoDecode = VideoDecode(
-                        Pair(screenWidth, screenHeight),
-                        sur,
-                        csd0!!,
-                        csd1,
-                        handler,
-                        session.videoCodecId,
-                    )
-                    Log.i(TAG, "Video decoder created: ${screenWidth}x${screenHeight}, codecId=0x${String.format("%x", session.videoCodecId)}")
-                }
-
-                videoDecode?.decodeIn(packet.data, packet.ptsUs)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Video stream error", e)
-        }
-        release()
-    }
-
-    // ============ Release - like Easycontrol Client.release() ============
-
     private fun release() {
-        if (status == -1) return
-        status = -1
-
-        for (i in 0..6) {
-            try {
-                when (i) {
-                    0 -> {
-                        keepAliveThread?.interrupt()
-                        audioDecodeThread?.interrupt()
-                        videoDecodeThread?.interrupt()
-                    }
-                    1 -> {
-                        keepAliveThread?.join(500)
-                        audioDecodeThread?.join(500)
-                        videoDecodeThread?.join(500)
-                    }
-                    2 -> {
-                        videoDecode?.release()
-                        videoDecode = null
-                    }
-                    3 -> {
-                        audioDecode?.release()
-                        audioDecode = null
-                    }
-                    4 -> {
-                        scrcpySession?.stop()
-                        scrcpySession = null
-                    }
-                    5 -> {
-                        handlerThread?.quitSafely()
-                        handlerThread = null
-                        handler = null
-                        surface = null
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error during cleanup step $i", e)
-            }
+        if (serviceBound) {
+            sessionService?.setSurface(null)
+            unbindService(serviceConnection)
+            serviceBound = false
         }
+        sessionService = null
     }
 
     override fun onDestroy() {
