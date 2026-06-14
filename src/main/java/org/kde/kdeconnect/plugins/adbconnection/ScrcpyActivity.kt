@@ -1,6 +1,5 @@
 package org.kde.kdeconnect.plugins.adbconnection
 
-import android.app.PictureInPictureParams
 import android.content.ComponentName
 import android.content.Intent
 import android.content.ServiceConnection
@@ -11,7 +10,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.util.Log
-import android.util.Rational
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.Surface
@@ -51,7 +49,6 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
     private var port: Int = 0
     private var prefsName: String = ""
     private var touchEventHandler: TouchEventHandler? = null
-    private var isInPipMode = false
     private var isNavBarVisible = true
     private val moreMenuHandler = android.os.Handler(Looper.getMainLooper())
     private var moreMenuRunnable: Runnable? = null
@@ -266,7 +263,7 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
             resetBarViewTimer()
         }
         findViewById<ImageView>(R.id.button_full_exit).setOnClickListener {
-            if (!isInPipMode) enterPipMode()
+            switchToFloating()
             hideBarView()
         }
         findViewById<ImageView>(R.id.button_close).setOnClickListener {
@@ -287,10 +284,6 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         }
         findViewById<ImageView>(R.id.button_lock).setOnClickListener {
             sessionService?.lockDevice()
-            resetBarViewTimer()
-        }
-        findViewById<ImageView>(R.id.button_floating).setOnClickListener {
-            switchToFloating()
             resetBarViewTimer()
         }
     }
@@ -341,48 +334,7 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         finish()
     }
 
-    override fun onUserLeaveHint() {
-        super.onUserLeaveHint()
-        if (status == 1 && screenWidth > 0 && screenHeight > 0) {
-            enterPipMode()
-        }
-    }
 
-    private fun enterPipMode() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val aspectRatio = Rational(screenWidth, screenHeight)
-            val params = PictureInPictureParams.Builder()
-                .setAspectRatio(aspectRatio)
-                .build()
-            try {
-                enterPictureInPictureMode(params)
-                isInPipMode = true
-                navBar.visibility = View.GONE
-                barView.visibility = View.GONE
-                buttonMore.visibility = View.GONE
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to enter PiP mode", e)
-            }
-        }
-    }
-
-    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
-        super.onPictureInPictureModeChanged(isInPictureInPictureMode)
-        isInPipMode = isInPictureInPictureMode
-        if (isInPictureInPictureMode) {
-            navBar.visibility = View.GONE
-            barView.visibility = View.GONE
-            buttonMore.visibility = View.GONE
-            window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-            )
-        } else {
-            navBar.visibility = if (isNavBarVisible) View.VISIBLE else View.GONE
-            buttonMore.visibility = View.VISIBLE
-        }
-    }
 
     override fun onDestroy() {
         moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
