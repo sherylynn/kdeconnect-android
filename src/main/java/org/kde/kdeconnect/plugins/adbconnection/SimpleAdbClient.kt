@@ -476,7 +476,7 @@ class SimpleAdbClient(
     }
 
     @Synchronized
-    private fun sendMsg(command: Int, arg0: Int = 0, arg1: Int = 0, data: ByteArray = ByteArray(0)) {
+    private fun sendMsg(command: Int, arg0: Int = 0, arg1: Int = 0, data: ByteArray = ByteArray(0), ignoreDisconnect: Boolean = false) {
         try {
             val crc = data.fold(0L) { acc, b -> acc + (b.toLong() and 0xFF) }.toInt()
             val header = ByteBuffer.allocate(24).order(ByteOrder.LITTLE_ENDIAN)
@@ -487,8 +487,10 @@ class SimpleAdbClient(
             if (data.isNotEmpty()) rawOut!!.write(data)
             rawOut!!.flush()
         } catch (e: Exception) {
-            isConnected = false
-            try { onDisconnect?.invoke() } catch (_: Exception) {}
+            if (!ignoreDisconnect) {
+                isConnected = false
+                try { onDisconnect?.invoke() } catch (_: Exception) {}
+            }
             throw e
         }
     }
@@ -592,7 +594,9 @@ class SimpleAdbClient(
         fun close() {
             if (!closed) {
                 closed = true
-                sendMsg(A_CLSE, localId, remoteId)
+                try {
+                    sendMsg(A_CLSE, localId, remoteId, ignoreDisconnect = true)
+                } catch (_: Exception) {}
                 streams.remove(localId)
             }
         }

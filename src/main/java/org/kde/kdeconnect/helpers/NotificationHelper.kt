@@ -54,11 +54,15 @@ object NotificationHelper {
             .setLightsEnabled(false)
             .setSound(null, null)
             .build()
+        val scrcpySessionChannel = NotificationChannelCompat.Builder(Channels.SCRCPY_SESSION, NotificationManagerCompat.IMPORTANCE_LOW)
+            .setName("Scrcpy Session")
+            .setVibrationEnabled(false)
+            .build()
         val channels = listOf(
             persistentChannel,
             defaultChannel, mediaChannel, fileTransferDownloadChannel, fileTransferDownloadCompleteChannel, fileTransferUploadChannel,
             fileTransferErrorChannel, receiveNotificationChannel, highPriorityChannel,
-            continueWatchingChannel
+            continueWatchingChannel, scrcpySessionChannel
         )
 
         val nm = NotificationManagerCompat.from(context)
@@ -96,5 +100,6 @@ object NotificationHelper {
         const val RECEIVENOTIFICATION: String = "receive"
         const val HIGHPRIORITY: String = "highpriority"
         const val CONTINUEWATCHING: String = "continuewatching"
+        const val SCRCPY_SESSION: String = "scrcpy_session_channel"
     }
 }

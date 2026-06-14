@@ -1,7 +1,5 @@
 package org.kde.kdeconnect.plugins.adbconnection
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -16,6 +14,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.Surface
 import androidx.core.app.NotificationCompat
+import org.kde.kdeconnect.helpers.NotificationHelper
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.AudioDecode
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.ScrcpySession
 import org.kde.kdeconnect.plugins.adbconnection.scrcpy.VideoDecode
@@ -30,7 +29,6 @@ class ScrcpySessionService : Service() {
 
     companion object {
         private const val TAG = "ScrcpySessionService"
-        private const val NOTIFICATION_CHANNEL_ID = "scrcpy_session_channel"
         private const val NOTIFICATION_ID = 2
 
         const val ACTION_START = "org.kde.kdeconnect.plugins.adbconnection.ACTION_START_SCRCPY_SESSION"
@@ -99,17 +97,7 @@ class ScrcpySessionService : Service() {
     }
 
     private fun startForeground() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                NOTIFICATION_CHANNEL_ID,
-                "Scrcpy Session",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
-        }
-
-        val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        val notification = NotificationCompat.Builder(this, NotificationHelper.Channels.SCRCPY_SESSION)
             .setContentTitle("Scrcpy Session")
             .setContentText("Running in background")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -323,13 +311,15 @@ class ScrcpySessionService : Service() {
         if (status == -1) return
         status = -1
 
-        keepAliveThread?.interrupt()
-        audioDecodeThread?.interrupt()
-        videoDecodeThread?.interrupt()
+        val currentThread = Thread.currentThread()
 
-        keepAliveThread?.join(500)
-        audioDecodeThread?.join(500)
-        videoDecodeThread?.join(500)
+        keepAliveThread?.let { if (it != currentThread) it.interrupt() }
+        audioDecodeThread?.let { if (it != currentThread) it.interrupt() }
+        videoDecodeThread?.let { if (it != currentThread) it.interrupt() }
+
+        keepAliveThread?.let { if (it != currentThread) it.join(500) }
+        audioDecodeThread?.let { if (it != currentThread) it.join(500) }
+        videoDecodeThread?.let { if (it != currentThread) it.join(500) }
 
         videoDecode?.release()
         videoDecode = null
