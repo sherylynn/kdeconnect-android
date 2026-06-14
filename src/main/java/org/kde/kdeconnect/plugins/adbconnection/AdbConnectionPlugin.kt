@@ -92,20 +92,6 @@ class AdbConnectionPlugin : Plugin() {
         return buttons
     }
 
-    override fun getUiMenuEntries(): List<PluginUiMenuEntry> {
-        val entries = mutableListOf<PluginUiMenuEntry>()
-
-        if (isDeviceInitialized) {
-            entries.add(
-                PluginUiMenuEntry(context.getString(R.string.adb_open_terminal)) { _ ->
-                    openTerminal()
-                }
-            )
-        }
-
-        return entries
-    }
-
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun connectToDevice() {
@@ -234,14 +220,6 @@ class AdbConnectionPlugin : Plugin() {
         val command = "CLASSPATH=$serverPath app_process / com.genymobile.scrcpy.Server 2.0"
         val result = executeCommand(command)
         Log.i(LOG_TAG, "scrcpy server launched: $result")
-    }
-
-    private fun openTerminal() {
-        val intent = Intent(context, AdbTerminalActivity::class.java).apply {
-            putExtra(AdbTerminalActivity.EXTRA_DEVICE_ID, device.deviceId)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
     }
 
     private fun getDeviceHost(): String {
