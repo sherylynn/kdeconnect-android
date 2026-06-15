@@ -492,7 +492,6 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
             android:name="org.kde.kdeconnect.plugins.adbconnection.ScrcpyActivity"
             android:label="@string/scrcpy_connecting"
             android:theme="@style/Theme.AppCompat.DayNight.NoActionBar"
-            android:screenOrientation="landscape"
             android:configChanges="orientation|screenSize|keyboardHidden"
             android:exported="false"
             android:supportsPictureInPicture="true"
