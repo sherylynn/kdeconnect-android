@@ -74,6 +74,7 @@ class ScrcpyFloatingService : Service() {
             sessionService?.onStatusChanged = { s ->
                 status = s
             }
+            status = sessionService?.getStatus() ?: 0
 
             sessionService?.onError = { error ->
                 Log.e(TAG, "Session error: $error")

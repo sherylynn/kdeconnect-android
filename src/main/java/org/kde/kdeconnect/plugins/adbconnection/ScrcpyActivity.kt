@@ -336,10 +336,10 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
     override fun onDestroy() {
         moreMenuRunnable?.let { moreMenuHandler.removeCallbacks(it) }
         if (serviceBound) {
-            sessionService?.setSurface(null)
             unbindService(serviceConnection)
             serviceBound = false
         }
+        sessionService = null
         super.onDestroy()
     }
 }
