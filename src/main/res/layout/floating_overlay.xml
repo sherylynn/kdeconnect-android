@@ -63,13 +63,13 @@
             android:tint="#DEDEDE" />
 
         <ImageView
-            android:id="@+id/floating_btn_back"
+            android:id="@+id/floating_btn_switch"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:focusable="false"
             android:padding="2dp"
-            android:src="@drawable/caret_left"
+            android:src="@drawable/square"
             android:tint="#DEDEDE" />
 
         <ImageView
@@ -83,13 +83,13 @@
             android:tint="#DEDEDE" />
 
         <ImageView
-            android:id="@+id/floating_btn_switch"
+            android:id="@+id/floating_btn_back"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="1"
             android:focusable="false"
             android:padding="2dp"
-            android:src="@drawable/square"
+            android:src="@drawable/caret_left"
             android:tint="#DEDEDE" />
 
         <ImageView
