@@ -235,6 +235,9 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
     }
 
     private fun setupBottomNavBar() {
+        findViewById<ImageView>(R.id.button_full_exit).setOnClickListener {
+            switchToFloating()
+        }
         findViewById<ImageView>(R.id.button_switch).setOnClickListener {
             sessionService?.sendAppSwitch()
             resetBarViewTimer()
@@ -258,10 +261,6 @@ class ScrcpyActivity : AppCompatActivity(), ScrcpyInputTextureView.InputCallback
         findViewById<ImageView>(R.id.button_mini).setOnClickListener {
             moveTaskToBack(true)
             resetBarViewTimer()
-        }
-        findViewById<ImageView>(R.id.button_full_exit).setOnClickListener {
-            switchToFloating()
-            hideBarView()
         }
         findViewById<ImageView>(R.id.button_close).setOnClickListener {
             sessionService?.release()
