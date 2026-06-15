@@ -71,6 +71,8 @@ class ScrcpySession(
     private var controlOutput: DataOutputStream? = null
     private var serverStream: SimpleAdbClient.AdbStream? = null
 
+    private var lockOnDisconnect: Boolean = false
+
     @Volatile
     private var closed = false
 
@@ -185,6 +187,7 @@ class ScrcpySession(
             val turnScreenOff = settings.getBoolean("scrcpy_turn_screen_off", false)
             val appStream = settings.getString("scrcpy_app_stream", "") ?: ""
             val newDisplay = settings.getString("scrcpy_new_display", "") ?: ""
+            lockOnDisconnect = settings.getBoolean("scrcpy_lock_on_disconnect", false)
 
             Log.i(TAG, "Settings: videoCodec=$videoCodec, audioForward=$audioForward, audioCodec=$audioCodec, maxSize=$maxSize, maxFps=$maxFps, videoBitRate=$videoBitRate, audioBitRate=$audioBitRate, control=$control, appStream=$appStream, newDisplay=$newDisplay")
 
@@ -565,7 +568,14 @@ class ScrcpySession(
         }
     }
 
-    fun stop() { closed = true; isRunning = false; cleanup() }
+    fun stop() {
+        if (lockOnDisconnect) {
+            lockDevice()
+        }
+        closed = true
+        isRunning = false
+        cleanup()
+    }
 
     private fun cleanup() {
         try {
